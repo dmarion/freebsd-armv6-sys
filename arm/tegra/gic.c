@@ -53,20 +53,31 @@ __FBSDID("$FreeBSD$");
  /* We are using GICv2 register naming */
 
  /* Distributor Registers */
-#define ARM_GICD_CTLR		0x000			/* v1 ICDDCR */
-#define ARM_GICD_TYPER		0x004			/* v1 ICDICTR */
-
-#define ARM_GICD_ISENABLER(n)   (0x0100 + ((n) * 4))	/* v1 ICDISERn */
-#define ARM_GICD_ICENABLER(n)   (0x0180 + ((n) * 4))	/* v1 ICDICERn */
-#define ARM_GICD_ICPENDR(n)	(0x0280 + ((n) * 4))	/* v1 ICDICPR */
-#define ARM_GICD_IPRIORITYR(n)	(0x0400 + ((n) * 4))	/* v1 ICDIPTRn */
-#define ARM_GICD_ITARGETSR(n)	(0x0800 + ((n) * 4))	/* v1 ICDIPTR */
-#define ARM_GICD_ICFGR(n)	(0x0C00 + ((n) * 4))	/* v1 ICDICFRn */
+#define GICD_CTLR		0x000			/* v1 ICDDCR */
+#define GICD_TYPER		0x004			/* v1 ICDICTR */
+#define GICD_IIDR		0x008			/* v1 ICDIIDR */
+#define GICD_IGROUPR(n)		(0x0080 + ((n) * 4))	/* v1 ICDISERn */
+#define GICD_ISENABLER(n)	(0x0100 + ((n) * 4))	/* v1 ICDISERn */
+#define GICD_ICENABLER(n)	(0x0180 + ((n) * 4))	/* v1 ICDICERn */
+#define GICD_ISPENDR(n)		(0x0200 + ((n) * 4))	/* v1 ICDISPR */
+#define GICD_ICPENDR(n)		(0x0280 + ((n) * 4))	/* v1 ICDICPR */
+#define GICD_ICACTIVER(n)	(0x0380 + ((n) * 4))	/* v1 ICDABR */
+#define GICD_IPRIORITYR(n)	(0x0400 + ((n) * 4))	/* v1 ICDIPTRn */
+#define GICD_ITARGETSR(n)	(0x0800 + ((n) * 4))	/* v1 ICDIPTR */
+#define GICD_ICFGR(n)		(0x0C00 + ((n) * 4))	/* v1 ICDICFRn */
+#define GICD_SGIR(n)		(0x0F00 + ((n) * 4))	/* v1 ICDSGIRn */
 
  /* CPU Registers */
-#define ARM_GICC_IAR		0x000C			/* v1 ICCIAR */
-#define ARM_GICC_EOIR		0x0010			/* v1 ICCEOIR */
-#define ARM_GICC_IIDR		0x00FC			/* v1 ICCIIDR*/
+#define GICC_CTLR		0x0000			/* v1 ICCICR */
+#define GICC_PMR		0x0004			/* v1 ICCPMR */
+#define GICC_BPR		0x0008			/* v1 ICCBPR */
+#define GICC_IAR		0x000C			/* v1 ICCIAR */
+#define GICC_EOIR		0x0010			/* v1 ICCEOIR */
+#define GICC_RPR		0x0014			/* v1 ICCRPR */
+#define GICC_HPPIR		0x0018			/* v1 ICCHPIR */
+#define GICC_ABPR		0x001C			/* v1 ICCABPR */
+#define GICC_IIDR		0x00FC			/* v1 ICCIIDR*/
+
 
 
 struct arm_gic_softc {
@@ -137,36 +148,42 @@ arm_gic_attach(device_t dev)
 	arm_gic_sc = sc;
 
 	/* Disable interrupt forwarding to the CPU interface */
-	gic_d_write_4(ARM_GICD_CTLR, 0x00);
+	gic_d_write_4(GICD_CTLR, 0x00);
 
 	/* Get the number of interrupts */
-	nirqs = gic_d_read_4(ARM_GICD_TYPER);
+	nirqs = gic_d_read_4(GICD_TYPER);
 	nirqs = 32 * ((nirqs & 0x1f) + 1);
 
-	icciidr = gic_c_read_4(ARM_GICC_IIDR);
+	icciidr = gic_c_read_4(GICC_IIDR);
 	device_printf(dev,"pn 0x%x, arch 0x%x, rev 0x%x, implementer 0x%x nirqs %u\n", 
 			icciidr>>20, (icciidr>>16) & 0xF, (icciidr>>12) & 0xf,
 			(icciidr & 0xfff), nirqs);
 
 	/* Set all global interrupts to be level triggered, active low. */
 	for (i = 32; i < nirqs; i += 32) {
-		gic_d_write_4(ARM_GICD_ICFGR(i >> 5), 0x00000000);
+		gic_d_write_4(GICD_ICFGR(i >> 5), 0x00000000);
 	}
 
 	/* Disable all interrupts. */
 	for (i = 32; i < nirqs; i += 32) {
-		gic_d_write_4(ARM_GICD_ICENABLER(i >> 5), 0xFFFFFFFF);
+		gic_d_write_4(GICD_ICENABLER(i >> 5), 0xFFFFFFFF);
 	}
 
 	/* Route all interrupts to CPU0 and set priority to 0 */
 	for (i = 32; i < nirqs; i += 32) {
-		gic_d_write_4(ARM_GICD_IPRIORITYR(i >> 5), 0x00000000);
-		gic_d_write_4(ARM_GICD_ITARGETSR(i >> 5), 0x01010101);
+		gic_d_write_4(GICD_IPRIORITYR(i >> 5), 0x00000000);
+		gic_d_write_4(GICD_ITARGETSR(i >> 5), 0x01010101);
 	}
 
 	/* Enable interrupt distribution */
-	gic_d_write_4(ARM_GICD_CTLR, 0x01);
+	gic_d_write_4(GICD_CTLR, 0x01);
 
+	/* Enable CPU interface */
+	gic_c_write_4(GICC_CTLR, 1);
+
+	gic_d_write_4(GICD_ICENABLER(0), 0xFFFFFFFF);
+	gic_d_write_4(GICD_ICENABLER(1), 0xFFFFFFFF);
+	gic_d_write_4(GICD_ICENABLER(2), 0xFFFFFFFF);
 	return (0);
 }
 
@@ -191,12 +208,14 @@ arm_get_next_irq(int last_irq)
 {
 	uint32_t active_irq;
 
+	printf("arm_get_next_irq %u\n",last_irq);
+
 	/* clean-up the last IRQ */
 	if (last_irq != -1) {
-		gic_c_write_4(ARM_GICC_EOIR, last_irq);
+		gic_c_write_4(GICC_EOIR, last_irq);
 	}
 
-	active_irq = gic_c_read_4(ARM_GICC_IAR);
+	active_irq = gic_c_read_4(GICC_IAR);
 	active_irq &= 0x3FF;
 
 	if (active_irq == 0x3FF) {
@@ -212,12 +231,12 @@ void
 arm_mask_irq(uintptr_t nb)
 {
 	printf("arm_mask_irq %u\n",nb);
-	gic_d_write_4(ARM_GICD_ICENABLER(nb >> 5), (1UL << (nb & 0x1F)));
+	gic_d_write_4(GICD_ICENABLER(nb >> 5), (1UL << (nb & 0x1F)));
 }
 
 void
 arm_unmask_irq(uintptr_t nb)
 {
 	printf("arm_unmask_irq %u\n",nb);
-	gic_d_write_4(ARM_GICD_ISENABLER(nb >> 5), (1UL << (nb & 0x1F)));
+	gic_d_write_4(GICD_ISENABLER(nb >> 5), (1UL << (nb & 0x1F)));
 }

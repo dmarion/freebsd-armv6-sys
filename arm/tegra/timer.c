@@ -162,13 +162,13 @@ tegra2_timer_attach(device_t dev)
 	} else {
 		/* This is 29-bit timer counter */
 		timer_write_4(TEGRA2_TIMER_TMR_PTV_0,0xC0001000);
-		printf("TEGRA2_TIMER_TMR_PTV_0 = 0x%08x\n", 
+		printf("TEGRA2_TIMER_TMR_PTV_0 = 0x%08x\n",
 			timer_read_4(TEGRA2_TIMER_TMR_PTV_0));
-		printf("TEGRA2_TIMER_TMR_PCR_0 = 0x%08x\n", 
+		printf("TEGRA2_TIMER_TMR_PCR_0 = 0x%08x\n",
 			timer_read_4(TEGRA2_TIMER_TMR_PCR_0));
 
 		if (bus_setup_intr(dev, sc->timer_res[1], INTR_TYPE_CLK,
-			tegra2_hardclock, NULL, sc, &ihl) != 0) 
+			tegra2_hardclock, NULL, sc, &ihl) != 0)
 		{
 			bus_release_resources(dev, tegra2_timer_spec, sc->timer_res);
 			device_printf(dev, "Could not setup interrupt.\n");
@@ -196,13 +196,9 @@ tegra2_timer_attach(device_t dev)
 static int
 tegra2_hardclock(void *arg)
 {
-	struct	tegra2_timer_sc *sc = (struct tegra2_timer_sc *)arg;;
+	struct	tegra2_timer_sc *sc = (struct tegra2_timer_sc *)arg;
 
 	printf("tegra2_hardclock\n");
-
-	if (!sc->lt_oneshot) {
-		printf("tegra2_hardclock start timer again\n");
-	}
 
 	if (sc->et.et_active)
 		sc->et.et_event_cb(&sc->et, sc->et.et_arg);
