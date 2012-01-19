@@ -60,14 +60,12 @@ static int
 fdt_pic_decode_ic(phandle_t node, pcell_t *intr, int *interrupt, int *trig,
     int *pol)
 {
-	printf("fdt_pic_decode_ic\n");
 	if (!fdt_is_compatible(node, "arm,gic"))
 		return (ENXIO);
 
 	*interrupt = fdt32_to_cpu(intr[0]);
 	*trig = INTR_TRIGGER_CONFORM;
 	*pol = INTR_POLARITY_CONFORM;
-	printf("fdt_pic_decode_ic interrupt=%u\n", *interrupt);
 	return (0);
 }
 
