@@ -61,6 +61,10 @@ __FBSDID("$FreeBSD$");
 #define OSC_FREQ_DET_TRIG			(1<<31)
 #define OSC_FREQ_DET_BUSY               	(1<<31)
 
+#define TEGRA2_TIMER_TMR_PTV_0		0x000	/*Timer Present Trigger Val (Set) Reg */
+#define TEGRA2_TIMER_TMR_PCR_0		0x004	/* Timer Present Count Val (Status) Reg */
+ 
+
 struct tegra2_timer_softc {
 	struct resource	*	timer_res[2];
 	bus_space_tag_t		timer_bst;
@@ -82,11 +86,11 @@ static int	tegra2_hardclock(void *);
 static int
 tegra2_osc_freq_detect(void)
 {
-	bus_space_handle_t 	bsh;
-	uint32_t 		c;
-	uint32_t 		r=0;
-	int 			i=0;
-	
+	bus_space_handle_t	bsh;
+	uint32_t		c;
+	uint32_t		r=0;
+	int			i=0;
+
 	struct {
 		uint32_t val;
 		uint32_t freq;
@@ -97,22 +101,22 @@ tegra2_osc_freq_detect(void)
 		{1587,  26000000 },
 		{  -1,         0 },
 	};
-	
+
 	printf("Measuring...\n");
 	bus_space_map(fdtbus_bs_tag,TEGRA2_CLK_RST_PA_BASE, 0x1000, 0, &bsh);
 
 	bus_space_write_4(fdtbus_bs_tag, bsh, TEGRA2_CLK_RST_OSC_FREQ_DET_REG,
-	 		OSC_FREQ_DET_TRIG | 1 );	
+			OSC_FREQ_DET_TRIG | 1 );
 	do {} while (bus_space_read_4(fdtbus_bs_tag, bsh,
 			TEGRA2_CLK_RST_OSC_FREQ_DET_STAT_REG) & OSC_FREQ_DET_BUSY);
-			
+
 	c = bus_space_read_4(fdtbus_bs_tag, bsh, TEGRA2_CLK_RST_OSC_FREQ_DET_STAT_REG);
-	
+
 	while (freq_det_cnts[i].val > 0) {
 		if (((freq_det_cnts[i].val - 3) < c) && (c < (freq_det_cnts[i].val + 3)))
 			r = freq_det_cnts[i].freq;
 		i++;
- 	}
+	}
 	printf("c=%u r=%u\n",c,r );
 	bus_space_free(fdtbus_bs_tag, bsh, 0x1000);
 	return r;
@@ -122,7 +126,6 @@ tegra2_osc_freq_detect(void)
 static int
 tegra2_timer_probe(device_t dev)
 {
-
 	if (!ofw_bus_is_compatible(dev, "nvidia,tegra2-timer"))
 		return (ENXIO);
 
@@ -142,7 +145,7 @@ tegra2_timer_attach(device_t dev)
 		return (ENXIO);
 
 	printf("timer_attach2\n");
-	
+
 	sc = (struct tegra2_timer_softc *)device_get_softc(dev);
 	timer_softc = sc;
 
@@ -152,9 +155,9 @@ tegra2_timer_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	printf("timer_attach3\n");
-	tegra2_osc_freq_detect();
-	
+	//printf("timer_attach3\n");
+	//tegra2_osc_freq_detect();
+
 	sc->timer_bst = rman_get_bustag(sc->timer_res[0]);
 	sc->timer_bsh = rman_get_bushandle(sc->timer_res[0]);
 
@@ -168,7 +171,6 @@ tegra2_timer_attach(device_t dev)
 		device_printf(dev, "Could not setup interrupt.\n");
 		return (ENXIO);
 	}
-	
 	return(0);
 }
 
