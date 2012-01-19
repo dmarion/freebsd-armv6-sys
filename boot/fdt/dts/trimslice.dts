@@ -83,6 +83,10 @@
 			interrupts = < 33 >;
 			interrupt-parent = <&GIC>;
 		};
+		tmrus@5010 {
+			compatible = "nvidia,tegra2-timestamp";
+			reg = <0x5010 0x8>;
+		};
 		tmr3@5050 {
 			compatible = "nvidia,tegra2-timer";
 			reg = <0x5050 0x8>;
