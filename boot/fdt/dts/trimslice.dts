@@ -47,7 +47,7 @@
 	};
 
 
-	SOC: tegra20@50000000 {
+	SOC: tegra20@50040000 {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		compatible = "simple-bus";
@@ -59,22 +59,40 @@
 			interrupt-controller;
 			#address-cells = <0>;
 			#interrupt-cells = <1>;
-			reg = < 0x1000 0x1000 >,	/* Distributor Registers */
-			      < 0x0100 0x0100 >;	/* CPU Interface Registers */
+			reg =	< 0x1000 0x1000 >,	/* Distributor Registers */
+				< 0x0100 0x0100 >;	/* CPU Interface Registers */
 		};
 	};
 
-	ppsb@6000000 {
+	ppsb@60000000 {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		compatible = "simple-bus";
-		ranges = <0 0x60000000 0x00200000>;	/* 2MB at 0x60000000 */
+		ranges = <0 0x60000000 0x00200000>;	/* 2M at 0x60000000 */
 		bus-frequency = <0>;
 
-		timer@50000 {
+		tmr1@5000 {
 			compatible = "nvidia,tegra2-timer";
-			reg = <0x50000 0x8>;
+			reg = <0x5000 0x8>;
 			interrupts = < 32 >;
+			interrupt-parent = <&GIC>;
+		};
+		tmr2@5008 {
+			compatible = "nvidia,tegra2-timer";
+			reg = <0x5008 0x8>;
+			interrupts = < 33 >;
+			interrupt-parent = <&GIC>;
+		};
+		tmr3@5050 {
+			compatible = "nvidia,tegra2-timer";
+			reg = <0x5050 0x8>;
+			interrupts = < 73 >;
+			interrupt-parent = <&GIC>;
+		};
+		tmr4@5058 {
+			compatible = "nvidia,tegra2-timer";
+			reg = <0x5058 0x8>;
+			interrupts = < 74 >;
 			interrupt-parent = <&GIC>;
 		};
 	};
@@ -112,7 +130,6 @@
 			interrupt-parent = <&GIC>;
 			clock-frequency = < 13500000 >;
 		};
-
 	};
 
 	chosen {
