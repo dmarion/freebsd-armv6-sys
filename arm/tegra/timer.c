@@ -196,19 +196,17 @@ tegra2_timer_attach(device_t dev)
 static int
 tegra2_hardclock(void *arg)
 {
-	struct	tegra2_timer_sc *sc;
-	uint32_t irq_cause;
-	
-	printf("tegra2_hardclock\n");
-#if 0
-	irq_cause = read_cpu_ctrl(BRIDGE_IRQ_CAUSE);
-	irq_cause &= ~(IRQ_TIMER0);
-	write_cpu_ctrl(BRIDGE_IRQ_CAUSE, irq_cause);
+	struct	tegra2_timer_sc *sc = (struct tegra2_timer_sc *)arg;;
 
-	sc = (struct tegra2_timer_sc *)arg;
+	printf("tegra2_hardclock\n");
+
+	if (!sc->lt_oneshot) {
+		printf("tegra2_hardclock start timer again\n");
+	}
+
 	if (sc->et.et_active)
 		sc->et.et_event_cb(&sc->et, sc->et.et_arg);
-#endif
+
 	return (FILTER_HANDLED);
 }
 
@@ -218,6 +216,7 @@ tegra2_timer_start(struct eventtimer *et, struct bintime *first,
 {
 	struct	tegra2_timer_sc *sc = (struct tegra2_timer_sc *)et->et_priv;
 	printf("tegra2_timer_start\n");
+	timer_write_4(TEGRA2_TIMER_TMR_PTV_0,0xC0010000);
 }
 
 static int
