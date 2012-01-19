@@ -343,6 +343,52 @@ physmap_init(void)
 	phys_avail[j + 1] = 0;
 }
 
+#define TEGRA2_CLK_RST_PA_BASE		0x60006000
+
+#define TEGRA2_CLK_RST_OSC_FREQ_DET_REG		0x58
+#define TEGRA2_CLK_RST_OSC_FREQ_DET_STAT_REG	0x5C
+#define OSC_FREQ_DET_TRIG			(1<<31)
+#define OSC_FREQ_DET_BUSY               	(1<<31)
+
+static int
+tegra2_osc_freq_detect(void)
+{
+	bus_space_handle_t	bsh;
+	uint32_t		c;
+	uint32_t		r=0;
+	int			i=0;
+
+	struct {
+		uint32_t val;
+		uint32_t freq;
+	} freq_det_cnts[] = {
+		{ 732,  12000000 },
+		{ 794,  13000000 },
+		{1172,  19200000 },
+		{1587,  26000000 },
+		{  -1,         0 },
+	};
+
+	printf("Measuring...\n");
+	bus_space_map(fdtbus_bs_tag,TEGRA2_CLK_RST_PA_BASE, 0x1000, 0, &bsh);
+
+	bus_space_write_4(fdtbus_bs_tag, bsh, TEGRA2_CLK_RST_OSC_FREQ_DET_REG,
+			OSC_FREQ_DET_TRIG | 1 );
+	do {} while (bus_space_read_4(fdtbus_bs_tag, bsh,
+			TEGRA2_CLK_RST_OSC_FREQ_DET_STAT_REG) & OSC_FREQ_DET_BUSY);
+
+	c = bus_space_read_4(fdtbus_bs_tag, bsh, TEGRA2_CLK_RST_OSC_FREQ_DET_STAT_REG);
+
+	while (freq_det_cnts[i].val > 0) {
+		if (((freq_det_cnts[i].val - 3) < c) && (c < (freq_det_cnts[i].val + 3)))
+			r = freq_det_cnts[i].freq;
+		i++;
+	}
+	printf("c=%u r=%u\n",c,r );
+	bus_space_free(fdtbus_bs_tag, bsh, 0x1000);
+	return r;
+}
+
 void *
 initarm(void *mdp, void *unused __unused)
 {

@@ -52,25 +52,20 @@ __FBSDID("$FreeBSD$");
 #include <machine/bus.h>
 #include <machine/fdt.h>
 
+#define TEGRA2_TIMER_TMR_PTV_0		0x00	/*Timer Present Trigger Val (Set) Reg */
+#define TEGRA2_TIMER_TMR_PCR_0		0x04	/* Timer Present Count Val (Status) Reg */
 
-// FIXME move to header
-#define TEGRA2_CLK_RST_PA_BASE		0x60006000
+#define TEGRA2_TIMERUS_CNTR_1US_0	0x00
+#define TEGRA2_TIMERUS_USEC_CFG_0	0x04
+#define TEGRA2_TIMERUS_CNTR_FREEZE_0	0x3c
 
-#define TEGRA2_CLK_RST_OSC_FREQ_DET_REG		0x58
-#define TEGRA2_CLK_RST_OSC_FREQ_DET_STAT_REG	0x5C
-#define OSC_FREQ_DET_TRIG			(1<<31)
-#define OSC_FREQ_DET_BUSY               	(1<<31)
-
-#define TEGRA2_TIMER_TMR_PTV_0		0x000	/*Timer Present Trigger Val (Set) Reg */
-#define TEGRA2_TIMER_TMR_PCR_0		0x004	/* Timer Present Count Val (Status) Reg */
- 
-
-struct tegra2_timer_softc {
+struct tegra2_timer_sc {
 	struct resource	*	timer_res[2];
 	bus_space_tag_t		timer_bst;
 	bus_space_handle_t	timer_bsh;
 	struct mtx		timer_mtx;
 	struct eventtimer	et;
+	int			is_timestamp;
 };
 
 static struct resource_spec tegra2_timer_spec[] = {
@@ -79,58 +74,56 @@ static struct resource_spec tegra2_timer_spec[] = {
 	{ -1, 0 }
 };
 
-static struct tegra2_timer_softc *timer_softc = NULL;
+static struct resource_spec tegra2_ts_spec[] = {
+	{ SYS_RES_MEMORY,	0,	RF_ACTIVE },
+	{ -1, 0 }
+};
 
-static int	tegra2_hardclock(void *);
+static struct tegra2_timer_sc *ts_sc = NULL;
 
-static int
-tegra2_osc_freq_detect(void)
-{
-	bus_space_handle_t	bsh;
-	uint32_t		c;
-	uint32_t		r=0;
-	int			i=0;
+#define	timer_read_4(reg)		\
+    bus_space_read_4(sc->timer_bst, sc->timer_bsh, reg)
+#define	timer_write_4(reg, val)		\
+    bus_space_write_4(sc->timer_bst, sc->timer_bsh, reg, val)
+#define	ts_read_4(reg)		\
+    bus_space_read_4(ts_sc->timer_bst, ts_sc->timer_bsh, reg)
+#define	ts_write_4(reg, val)		\
+    bus_space_write_4(ts_sc->timer_bst, ts_sc->timer_bsh, reg, val)
 
-	struct {
-		uint32_t val;
-		uint32_t freq;
-	} freq_det_cnts[] = {
-		{ 732,  12000000 },
-		{ 794,  13000000 },
-		{1172,  19200000 },
-		{1587,  26000000 },
-		{  -1,         0 },
-	};
+static int tegra2_timer_start(struct eventtimer *, struct bintime *first,
+	struct bintime *);
+static int tegra2_timer_stop(struct eventtimer *et);
+static unsigned tegra2_get_ts(struct timecounter *);
+static int tegra2_hardclock(void *);
 
-	printf("Measuring...\n");
-	bus_space_map(fdtbus_bs_tag,TEGRA2_CLK_RST_PA_BASE, 0x1000, 0, &bsh);
-
-	bus_space_write_4(fdtbus_bs_tag, bsh, TEGRA2_CLK_RST_OSC_FREQ_DET_REG,
-			OSC_FREQ_DET_TRIG | 1 );
-	do {} while (bus_space_read_4(fdtbus_bs_tag, bsh,
-			TEGRA2_CLK_RST_OSC_FREQ_DET_STAT_REG) & OSC_FREQ_DET_BUSY);
-
-	c = bus_space_read_4(fdtbus_bs_tag, bsh, TEGRA2_CLK_RST_OSC_FREQ_DET_STAT_REG);
-
-	while (freq_det_cnts[i].val > 0) {
-		if (((freq_det_cnts[i].val - 3) < c) && (c < (freq_det_cnts[i].val + 3)))
-			r = freq_det_cnts[i].freq;
-		i++;
-	}
-	printf("c=%u r=%u\n",c,r );
-	bus_space_free(fdtbus_bs_tag, bsh, 0x1000);
-	return r;
-}
-
+static struct timecounter tegra2_timestamp = {
+	.tc_get_timecount = tegra2_get_ts,
+	.tc_name = "Tegra 2 Timerstamp",
+	.tc_frequency = 10000000,
+	.tc_counter_mask = ~0u,
+	.tc_quality = 1000,
+};
 
 static int
 tegra2_timer_probe(device_t dev)
 {
-	if (!ofw_bus_is_compatible(dev, "nvidia,tegra2-timer"))
-		return (ENXIO);
+	struct	tegra2_timer_sc *sc;
 
-	device_set_desc(dev, "Nvidia Tegra 2 CPU Timer");
-	return (0);
+	sc = (struct tegra2_timer_sc *)device_get_softc(dev);
+
+	if (ofw_bus_is_compatible(dev, "nvidia,tegra2-timer")) {
+		device_set_desc(dev, "Nvidia Tegra 2 Timer");
+		sc->is_timestamp=0;
+		return(0);
+	}
+
+	if (ofw_bus_is_compatible(dev, "nvidia,tegra2-timestamp")) {
+		device_set_desc(dev, "Nvidia Tegra 2 Timestamp");
+		sc->is_timestamp=1;
+		return(0);
+	}
+
+	return (ENXIO);
 }
 
 static int
@@ -138,46 +131,72 @@ tegra2_timer_attach(device_t dev)
 {
 	int	error;
 	void	*ihl;
-	struct	tegra2_timer_softc *sc;
+	struct	tegra2_timer_sc *sc;
 	uint32_t irq_cause, irq_mask;
 
-	if (timer_softc != NULL)
-		return (ENXIO);
+	sc = (struct tegra2_timer_sc *)device_get_softc(dev);
 
-	printf("timer_attach2\n");
+	if (sc->is_timestamp)
+		error = bus_alloc_resources(dev, tegra2_ts_spec, sc->timer_res);
+	else
+		error = bus_alloc_resources(dev, tegra2_timer_spec, sc->timer_res);
 
-	sc = (struct tegra2_timer_softc *)device_get_softc(dev);
-	timer_softc = sc;
-
-	error = bus_alloc_resources(dev, tegra2_timer_spec, sc->timer_res);
 	if (error) {
 		device_printf(dev, "could not allocate resources\n");
 		return (ENXIO);
 	}
 
-	//printf("timer_attach3\n");
-	//tegra2_osc_freq_detect();
-
 	sc->timer_bst = rman_get_bustag(sc->timer_res[0]);
 	sc->timer_bsh = rman_get_bushandle(sc->timer_res[0]);
 
-	//mtx_init(&timer_softc->timer_mtx, "watchdog", NULL, MTX_DEF);
-	//tegra2_watchdog_disable();
-	//EVENTHANDLER_REGISTER(watchdog_list, tegra2_watchdog_event, sc, 0);
+	if (sc->is_timestamp) {
+		/* This is 32-bit timestamp counter */
 
-	if (bus_setup_intr(dev, sc->timer_res[1], INTR_TYPE_CLK,
-	    tegra2_hardclock, NULL, sc, &ihl) != 0) {
-		bus_release_resources(dev, tegra2_timer_spec, sc->timer_res);
-		device_printf(dev, "Could not setup interrupt.\n");
-		return (ENXIO);
+		/* There should be only one timestamp counter*/
+		if (ts_sc != NULL)
+			return (ENXIO);
+
+		ts_sc = sc;
+		tc_init(&tegra2_timestamp);
+
+	} else {
+		/* This is 29-bit timer counter */
+		timer_write_4(TEGRA2_TIMER_TMR_PTV_0,0xC0001000);
+		printf("TEGRA2_TIMER_TMR_PTV_0 = 0x%08x\n", 
+			timer_read_4(TEGRA2_TIMER_TMR_PTV_0));
+		printf("TEGRA2_TIMER_TMR_PCR_0 = 0x%08x\n", 
+			timer_read_4(TEGRA2_TIMER_TMR_PCR_0));
+
+		if (bus_setup_intr(dev, sc->timer_res[1], INTR_TYPE_CLK,
+			tegra2_hardclock, NULL, sc, &ihl) != 0) 
+		{
+			bus_release_resources(dev, tegra2_timer_spec, sc->timer_res);
+			device_printf(dev, "Could not setup interrupt.\n");
+			return (ENXIO);
+		}
+		sc->et.et_frequency = (uint64_t)1000000;
+		sc->et.et_name = "Tegra 2 Timer";
+		sc->et.et_flags = ET_FLAGS_PERIODIC | ET_FLAGS_ONESHOT;
+		sc->et.et_quality = 1000;
+		sc->et.et_min_period.sec = 0;
+		sc->et.et_min_period.frac =
+			((0x00000002LLU << 32) / sc->et.et_frequency) << 32;
+		sc->et.et_max_period.sec = 0xfffffff0U / sc->et.et_frequency;
+		sc->et.et_max_period.frac =
+			((0xfffffffeLLU << 32) / sc->et.et_frequency) << 32;
+		sc->et.et_start = tegra2_timer_start;
+		sc->et.et_stop = tegra2_timer_stop;
+		sc->et.et_priv = sc;
+		et_register(&sc->et);
 	}
+
 	return(0);
 }
 
 static int
 tegra2_hardclock(void *arg)
 {
-	struct	tegra2_timer_softc *sc;
+	struct	tegra2_timer_sc *sc;
 	uint32_t irq_cause;
 	
 	printf("tegra2_hardclock\n");
@@ -186,54 +205,79 @@ tegra2_hardclock(void *arg)
 	irq_cause &= ~(IRQ_TIMER0);
 	write_cpu_ctrl(BRIDGE_IRQ_CAUSE, irq_cause);
 
-	sc = (struct tegra2_timer_softc *)arg;
+	sc = (struct tegra2_timer_sc *)arg;
 	if (sc->et.et_active)
 		sc->et.et_event_cb(&sc->et, sc->et.et_arg);
 #endif
 	return (FILTER_HANDLED);
 }
 
+static int
+tegra2_timer_start(struct eventtimer *et, struct bintime *first,
+	struct bintime *period)
+{
+	struct	tegra2_timer_sc *sc = (struct tegra2_timer_sc *)et->et_priv;
+	printf("tegra2_timer_start\n");
+}
+
+static int
+tegra2_timer_stop(struct eventtimer *et)
+{
+	struct	tegra2_timer_sc *sc = (struct tegra2_timer_sc *)et->et_priv;
+	printf("tegra2_timer_stop\n");
+	timer_write_4(TEGRA2_TIMER_TMR_PTV_0, 0);
+	return(0);
+}
 
 static device_method_t tegra2_timer_methods[] = {
 	DEVMETHOD(device_probe, tegra2_timer_probe),
 	DEVMETHOD(device_attach, tegra2_timer_attach),
-
 	{ 0, 0 }
 };
 
 static driver_t tegra2_timer_driver = {
 	"timer",
 	tegra2_timer_methods,
-	sizeof(struct tegra2_timer_softc),
+	sizeof(struct tegra2_timer_sc),
 };
 
 static devclass_t tegra2_timer_devclass;
 
 DRIVER_MODULE(timer, simplebus, tegra2_timer_driver, tegra2_timer_devclass, 0, 0);
 
+static unsigned
+tegra2_get_ts(struct timecounter *tc)
+{
+	return ts_read_4(TEGRA2_TIMERUS_CNTR_1US_0);
+}
 
 void
 cpu_initclocks(void)
 {
-//	cpu_initclocks_bsp();
+	cpu_initclocks_bsp();
 }
-
-#if 0
-void
-cpu_startprofclock(void)
-{
-
-}
-
-void
-cpu_stopprofclock(void)
-{
-
-}
-#endif
 
 void
 DELAY(int usec)
 {
-	// FIXME: TODO
+	uint32_t counter;
+	uint32_t first, last;
+	int val = usec;
+
+	if (ts_sc == NULL) {
+		for (; usec > 0; usec--)
+			for (counter = 100; counter > 0; counter--)
+				;
+		return;
+	}
+
+	first = ts_read_4(TEGRA2_TIMERUS_CNTR_1US_0);
+	while (val > 0) {
+		last = ts_read_4(TEGRA2_TIMERUS_CNTR_1US_0);
+		if (last < first) {
+			last = first;
+		}
+		val -= (last - first);
+		first = last;
+	}
 }

@@ -190,15 +190,15 @@ int
 arm_get_next_irq(int last_irq)
 {
 	uint32_t active_irq;
-	
+
 	/* clean-up the last IRQ */
 	if (last_irq != -1) {
 		gic_c_write_4(ARM_GICC_EOIR, last_irq);
 	}
-	
+
 	active_irq = gic_c_read_4(ARM_GICC_IAR);
 	active_irq &= 0x3FF;
-	
+
 	if (active_irq == 0x3FF) {
 		if (last_irq == -1)
 			printf("Spurious interrupt detected [0x%08x]\n", active_irq);
