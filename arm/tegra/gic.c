@@ -56,16 +56,16 @@ __FBSDID("$FreeBSD$");
 #define GICD_CTLR		0x000			/* v1 ICDDCR */
 #define GICD_TYPER		0x004			/* v1 ICDICTR */
 #define GICD_IIDR		0x008			/* v1 ICDIIDR */
-#define GICD_IGROUPR(n)		(0x0080 + ((n) * 4))	/* v1 ICDISERn */
-#define GICD_ISENABLER(n)	(0x0100 + ((n) * 4))	/* v1 ICDISERn */
-#define GICD_ICENABLER(n)	(0x0180 + ((n) * 4))	/* v1 ICDICERn */
+#define GICD_IGROUPR(n)		(0x0080 + ((n) * 4))	/* v1 ICDISER */
+#define GICD_ISENABLER(n)	(0x0100 + ((n) * 4))	/* v1 ICDISER */
+#define GICD_ICENABLER(n)	(0x0180 + ((n) * 4))	/* v1 ICDICER */
 #define GICD_ISPENDR(n)		(0x0200 + ((n) * 4))	/* v1 ICDISPR */
 #define GICD_ICPENDR(n)		(0x0280 + ((n) * 4))	/* v1 ICDICPR */
 #define GICD_ICACTIVER(n)	(0x0380 + ((n) * 4))	/* v1 ICDABR */
-#define GICD_IPRIORITYR(n)	(0x0400 + ((n) * 4))	/* v1 ICDIPTRn */
+#define GICD_IPRIORITYR(n)	(0x0400 + ((n) * 4))	/* v1 ICDIPR */
 #define GICD_ITARGETSR(n)	(0x0800 + ((n) * 4))	/* v1 ICDIPTR */
-#define GICD_ICFGR(n)		(0x0C00 + ((n) * 4))	/* v1 ICDICFRn */
-#define GICD_SGIR(n)		(0x0F00 + ((n) * 4))	/* v1 ICDSGIRn */
+#define GICD_ICFGR(n)		(0x0C00 + ((n) * 4))	/* v1 ICDICFR */
+#define GICD_SGIR(n)		(0x0F00 + ((n) * 4))	/* v1 ICDSGIR */
 
  /* CPU Registers */
 #define GICC_CTLR		0x0000			/* v1 ICCICR */
@@ -175,15 +175,43 @@ arm_gic_attach(device_t dev)
 		gic_d_write_4(GICD_ITARGETSR(i >> 5), 0x01010101);
 	}
 
-	/* Enable interrupt distribution */
-	gic_d_write_4(GICD_CTLR, 0x01);
-
 	/* Enable CPU interface */
 	gic_c_write_4(GICC_CTLR, 1);
+
+	/* Set CPU Priority Mask */
+//	gic_c_write_4(GICC_PMR, 0xFF);
+
+	/* Enable interrupt distribution */
+	gic_d_write_4(GICD_CTLR, 0x01);
 
 	gic_d_write_4(GICD_ICENABLER(0), 0xFFFFFFFF);
 	gic_d_write_4(GICD_ICENABLER(1), 0xFFFFFFFF);
 	gic_d_write_4(GICD_ICENABLER(2), 0xFFFFFFFF);
+
+	printf("GICD_CTLR  = 0x%08x\n", gic_d_read_4(GICD_CTLR));
+	printf("GICD_TYPER = 0x%08x\n", gic_d_read_4(GICD_TYPER));
+	printf("GICD_IIDR  = 0x%08x\n", gic_d_read_4(GICD_IIDR));
+
+	printf("GICD_IGROUPR    ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_IGROUPR(i))); printf("\n");
+	printf("GICD_ISENABLER  ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ISENABLER(i))); printf("\n");
+	printf("GICD_ICENABLER  ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ICENABLER(i))); printf("\n");
+	printf("GICD_ISPENDR    ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ISPENDR(i))); printf("\n");
+	printf("GICD_ICPENDR    ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ICPENDR(i))); printf("\n");
+	printf("GICD_ICACTIVER  ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ICACTIVER(i))); printf("\n");
+	printf("GICD_IPRIORITYR ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_IPRIORITYR(i))); printf("\n");
+	printf("GICD_ITARGETSR  ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ITARGETSR(i))); printf("\n");
+	printf("GICD_ICFGR      ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ICFGR(i))); printf("\n");
+	printf("GICD_SGIR       ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_SGIR(i))); printf("\n");
+
+	printf("GICC_CTLR  = 0x%08x\n", gic_c_read_4(GICC_CTLR));
+	printf("GICC_PMR   = 0x%08x\n", gic_c_read_4(GICC_PMR));
+	printf("GICC_BPR   = 0x%08x\n", gic_c_read_4(GICC_BPR));
+	printf("GICC_IAR   = 0x%08x\n", gic_c_read_4(GICC_IAR));
+	printf("GICC_EOIR  = 0x%08x\n", gic_c_read_4(GICC_EOIR));
+	printf("GICC_RPR   = 0x%08x\n", gic_c_read_4(GICC_RPR));
+	printf("GICC_HPPIR = 0x%08x\n", gic_c_read_4(GICC_HPPIR));
+	printf("GICC_ABPR  = 0x%08x\n", gic_c_read_4(GICC_ABPR));
+	printf("GICC_IIDR  = 0x%08x\n", gic_c_read_4(GICC_IIDR));
 	return (0);
 }
 
@@ -237,6 +265,33 @@ arm_mask_irq(uintptr_t nb)
 void
 arm_unmask_irq(uintptr_t nb)
 {
+	int i;
 	printf("arm_unmask_irq %u\n",nb);
 	gic_d_write_4(GICD_ISENABLER(nb >> 5), (1UL << (nb & 0x1F)));
+
+	printf("GICD_CTLR  = 0x%08x\n", gic_d_read_4(GICD_CTLR));
+	printf("GICD_TYPER = 0x%08x\n", gic_d_read_4(GICD_TYPER));
+	printf("GICD_IIDR  = 0x%08x\n", gic_d_read_4(GICD_IIDR));
+
+	printf("GICD_IGROUPR    ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_IGROUPR(i))); printf("\n");
+	printf("GICD_ISENABLER  ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ISENABLER(i))); printf("\n");
+	printf("GICD_ICENABLER  ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ICENABLER(i))); printf("\n");
+	printf("GICD_ISPENDR    ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ISPENDR(i))); printf("\n");
+	printf("GICD_ICPENDR    ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ICPENDR(i))); printf("\n");
+	printf("GICD_ICACTIVER  ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ICACTIVER(i))); printf("\n");
+	printf("GICD_IPRIORITYR ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_IPRIORITYR(i))); printf("\n");
+	printf("GICD_ITARGETSR  ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ITARGETSR(i))); printf("\n");
+	printf("GICD_ICFGR      ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_ICFGR(i))); printf("\n");
+	printf("GICD_SGIR       ="); for(i=0;i<5;i++) printf(" 0x%08x", gic_d_read_4(GICD_SGIR(i))); printf("\n");
+
+	printf("GICC_CTLR  = 0x%08x\n", gic_c_read_4(GICC_CTLR));
+	printf("GICC_PMR   = 0x%08x\n", gic_c_read_4(GICC_PMR));
+	printf("GICC_BPR   = 0x%08x\n", gic_c_read_4(GICC_BPR));
+	printf("GICC_IAR   = 0x%08x\n", gic_c_read_4(GICC_IAR));
+	printf("GICC_EOIR  = 0x%08x\n", gic_c_read_4(GICC_EOIR));
+	printf("GICC_RPR   = 0x%08x\n", gic_c_read_4(GICC_RPR));
+	printf("GICC_HPPIR = 0x%08x\n", gic_c_read_4(GICC_HPPIR));
+	printf("GICC_ABPR  = 0x%08x\n", gic_c_read_4(GICC_ABPR));
+	printf("GICC_IIDR  = 0x%08x\n", gic_c_read_4(GICC_IIDR));
+
 }
