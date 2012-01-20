@@ -22,6 +22,16 @@ options		RWLOCK_NOINLINE
 options		NO_FFS_SNAPSHOT
 options		NO_SWAPPING
 
+# NFS Boot
+options         NFSCL
+options         NFS_ROOT
+#options        BOOTP
+#options        BOOTP_NFSROOT
+#options        BOOTP_NFSV3
+#options        BOOTP_WIRED_TO=nlge0
+#options        BOOTP_COMPAT
+#options        ROOTDEVNAME=\"nfs:192.168.123.11:/mnt/trimslice-root"
+
 # Debugging
 makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
 makeoptions	WERROR=""
@@ -45,6 +55,18 @@ device		uart
 
 # Networking
 device		ether
+device		miibus		# MII bus support
+
+# USB
+options         USB_DEBUG       # enable debug msgs
+device          ohci            # OHCI PCI->USB interface
+device          ehci            # EHCI PCI->USB interface (USB 2.0)
+device          usb             # USB Bus (required)
+
+# USB Ethernet
+device          aue             # ADMtek USB Ethernet
+device          axe             # ASIX Electronics USB Ethernet
+device          cdce            # Generic USB over Ethernet
 
 # Flattened Device Tree
 options 	FDT
