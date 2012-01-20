@@ -210,9 +210,30 @@ static int
 tegra2_timer_start(struct eventtimer *et, struct bintime *first,
 	struct bintime *period)
 {
+	uint32_t val, val1;
+
 	struct	tegra2_timer_sc *sc = (struct tegra2_timer_sc *)et->et_priv;
 	printf("tegra2_timer_start\n");
-	timer_write_4(TEGRA2_TIMER_TMR_PTV_0,0xC0010000);
+
+	if (period != NULL) {
+		val = (sc->et.et_frequency * (period->frac >> 32)) >> 32;
+		if (period->sec != 0)
+			val += sc->et.et_frequency * period->sec;
+		printf("tegra2_timer_start period->frac=%u period->sec=%u\n",period->frac,period->sec);
+	} else
+		val = 0;
+	if (first != NULL) {
+		val1 = (sc->et.et_frequency * (first->frac >> 32)) >> 32;
+		if (first->sec != 0)
+			val1 += sc->et.et_frequency * first->sec;
+		printf("tegra2_timer_start first->frac=%u first->sec=%u\n",first->frac,first->sec);
+	} else
+		val1 = val;
+
+	printf("tegra2_timer_start val=0x%08x val1=0x%08x\n",val,val1);
+
+	timer_write_4(TEGRA2_TIMER_TMR_PTV_0,0xC00003e8);
+	return(0);
 }
 
 static int
