@@ -58,8 +58,8 @@
 			interrupt-controller;
 			#address-cells = <0>;
 			#interrupt-cells = <1>;
-			reg =	< 0x1000 0x1000 >,	/* Distributor Registers */
-				< 0x0100 0x0100 >;	/* CPU Interface Registers */
+			reg =	< 0x241000 0x1000 >,	/* Distributor Registers */
+				< 0x240100 0x0100 >;	/* CPU Interface Registers */
 		};
 
 		uart3: serial@200000 {

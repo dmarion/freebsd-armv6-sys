@@ -1,8 +1,6 @@
 /*-
- * Copyright (C) 2008 MARVELL INTERNATIONAL LTD.
+ * Copyright (C) 2012 FreeBSD Foundation
  * All rights reserved.
- *
- * Developed by Semihalf.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,123 +38,76 @@ __FBSDID("$FreeBSD$");
 
 #include <machine/bus.h>
 
-/*
- * Bus space functions for Marvell SoC family
- */
-
 /* Prototypes for all the bus_space structure functions */
 bs_protos(generic);
-bs_protos(generic_armv4);
+bs_protos(generic_armv7);
 
-/*
- * The bus space tag.  This is constant for all instances, so
- * we never have to explicitly "create" it.
- */
-static struct bus_space _base_tag = {
+struct bus_space _base_tag = {
 	/* cookie */
-	(void *) 0,
-
+	.bs_cookie	= (void *) 0,
+	
 	/* mapping/unmapping */
-	generic_bs_map,
-	generic_bs_unmap,
-	generic_bs_subregion,
-
+	.bs_map		= generic_bs_map,
+	.bs_unmap	= generic_bs_unmap,
+	.bs_subregion	= generic_bs_subregion,
+	
 	/* allocation/deallocation */
-	generic_bs_alloc,
-	generic_bs_free,
-
+	.bs_alloc	= generic_bs_alloc,
+	.bs_free	= generic_bs_free,
+	
 	/* barrier */
-	generic_bs_barrier,
-
+	.bs_barrier	= generic_bs_barrier,
+	
 	/* read (single) */
-	generic_bs_r_1,
-	generic_armv4_bs_r_2,
-	generic_bs_r_4,
-	NULL,
-
+	.bs_r_1		= generic_bs_r_1,
+	.bs_r_2		= generic_armv7_bs_r_2,
+	.bs_r_4		= generic_bs_r_4,
+	.bs_r_8		= NULL,
+	
 	/* read multiple */
-	generic_bs_rm_1,
-	generic_armv4_bs_rm_2,
-	generic_bs_rm_4,
-	NULL,
-
+	.bs_rm_1	= generic_bs_rm_1,
+	.bs_rm_2	= generic_armv7_bs_rm_2,
+	.bs_rm_4	= generic_bs_rm_4,
+	.bs_rm_8	= NULL,
+	
 	/* read region */
-	generic_bs_rr_1,
-	generic_armv4_bs_rr_2,
-	generic_bs_rr_4,
-	NULL,
-
+	.bs_rr_1	= generic_bs_rr_1,
+	.bs_rr_2	= generic_armv7_bs_rr_2,
+	.bs_rr_4	= generic_bs_rr_4,
+	.bs_rr_8	= NULL,
+	
 	/* write (single) */
-	generic_bs_w_1,
-	generic_armv4_bs_w_2,
-	generic_bs_w_4,
-	NULL,
-
+	.bs_w_1		= generic_bs_w_1,
+	.bs_w_2		= generic_armv7_bs_w_2,
+	.bs_w_4		= generic_bs_w_4,
+	.bs_w_8		= NULL,
+	
 	/* write multiple */
-	generic_bs_wm_1,
-	generic_armv4_bs_wm_2,
-	generic_bs_wm_4,
-	NULL,
-
+	.bs_wm_1	= generic_bs_wm_1,
+	.bs_wm_2	= generic_armv7_bs_wm_2,
+	.bs_wm_4	= generic_bs_wm_4,
+	.bs_wm_8	= NULL,
+	
 	/* write region */
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-
+	.bs_wr_1	= generic_bs_wr_1,
+	.bs_wr_2	= generic_armv7_bs_wr_2,
+	.bs_wr_4	= generic_bs_wr_4,
+	.bs_wr_8	= NULL,
+	
 	/* set multiple */
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-
+	/* XXX not implemented */
+	
 	/* set region */
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-
+	.bs_sr_1	= NULL,
+	.bs_sr_2	= generic_armv7_bs_sr_2,
+	.bs_sr_4	= generic_bs_sr_4,
+	.bs_sr_8	= NULL,
+	
 	/* copy */
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-
-	/* read stream (single) */
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-
-	/* read multiple stream */
-	NULL,
-	generic_armv4_bs_rm_2,		/* bus_space_read_multi_stream_2 */
-	NULL,
-	NULL,
-
-	/* read region stream */
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-
-	/* write stream (single) */
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-
-	/* write multiple stream */
-	NULL,
-	generic_armv4_bs_wm_2,		/* bus_space_write_multi_stream_2 */
-	NULL,
-	NULL,
-
-	/* write region stream */
-	NULL,
-	NULL,
-	NULL,
-	NULL
+	.bs_c_1		= NULL,
+	.bs_c_2		= generic_armv7_bs_c_2,
+	.bs_c_4		= NULL,
+	.bs_c_8		= NULL,
 };
 
 bus_space_tag_t fdtbus_bs_tag = &_base_tag;
