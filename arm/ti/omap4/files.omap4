@@ -14,8 +14,6 @@ arm/arm/irq_dispatch.S				standard
 arm/ti/ti_machdep.c				standard
 arm/ti/bus_space.c				standard
 arm/ti/common.c					standard
-arm/ti/debug.c					standard
-arm/omap/omap.c					standard
 arm/omap/omap_cpuid.c				standard
 arm/omap/omap_prcm.c				standard
 arm/omap/omap_scm.c				standard

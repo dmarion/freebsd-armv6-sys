@@ -37,8 +37,8 @@
 	interrupt-parent = <&GIC>;
 
 	aliases {
-		serial0 = &serial0;
 		soc = &SOC;
+		uart3 = &uart3;
 	};
 
 	memory {
@@ -62,18 +62,19 @@
 				< 0x0100 0x0100 >;	/* CPU Interface Registers */
 		};
 
-		serial0: serial@6A0000 {
+		uart3: serial@200000 {
 			compatible = "ns16550";
-			reg = <0x6A000 0x1000>;
+			reg = <0x20000 0x1000>;
 			reg-shift = <2>;
 			interrupts = < 68 >;
 			interrupt-parent = <&GIC>;
-			clock-frequency = < 215654400 >;
+			clock-frequency = < 48000000 >; /* 48Mhz clock for all uarts */
+							/* (techref 17.3.1.1) */
 		};
 	};
 
 	chosen {
-		stdin = "serial0";
-		stdout = "serial0";
+		stdin = "uart3";
+		stdout = "uart3";
 	};
 };
