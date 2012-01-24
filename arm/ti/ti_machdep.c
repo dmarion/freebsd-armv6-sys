@@ -632,7 +632,7 @@ bus_dma_get_range_nb(void)
 void
 cpu_reset()
 {
-	omap_prcm_reset();
+//	omap_prcm_reset();
 	printf("Reset failed!\n");
 	while (1);
 }

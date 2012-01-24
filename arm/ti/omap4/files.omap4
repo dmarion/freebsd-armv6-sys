@@ -11,18 +11,18 @@ arm/arm/cpufunc_asm_armv7.S			standard
 arm/arm/cpufunc_asm_pj4b.S			standard
 arm/arm/irq_dispatch.S				standard
 
+arm/arm/gic.c					standard
+
 arm/ti/ti_machdep.c				standard
 arm/ti/bus_space.c				standard
 arm/ti/common.c					standard
-arm/omap/omap_cpuid.c				standard
+#arm/omap/omap_cpuid.c				standard
 arm/omap/omap_prcm.c				standard
 arm/omap/omap_scm.c				standard
 arm/omap/omap_if.m				standard
 arm/omap/omap_space_asm.S			standard
 
 arm/omap/omap4/omap4_if.m			standard
-arm/omap/omap4/omap44xx.c			standard
-arm/omap/omap4/omap4_intr.c			standard
 arm/omap/omap4/omap4_prcm_clks.c		standard
 arm/omap/omap4/omap4_scm_padconf.c		standard
 arm/omap/omap4/omap4_timer.c			standard
