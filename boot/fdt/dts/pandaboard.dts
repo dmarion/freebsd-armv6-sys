@@ -46,25 +46,37 @@
 		reg = < 0x80000000 0x40000000 >;	/* 1GB RAM at 0x0 */
 	};
 
-	SOC: l4per@48000000 {
+	SOC: omap4430 {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		compatible = "simple-bus";
-		ranges = <0 0x48000000 0x01000000>;	/* 16MB at 0x70000000 */
+		ranges;
 		bus-frequency = <0>;
 
-		GIC: interrupt-controller@241000 {
+		GIC: interrupt-controller@48241000 {
 			compatible = "arm,gic";
 			interrupt-controller;
 			#address-cells = <0>;
 			#interrupt-cells = <1>;
-			reg =	< 0x241000 0x1000 >,	/* Distributor Registers */
-				< 0x240100 0x0100 >;	/* CPU Interface Registers */
+			reg =	< 0x48241000 0x1000 >,	/* Distributor Registers */
+				< 0x48240100 0x0100 >;	/* CPU Interface Registers */
 		};
 
-		uart3: serial@200000 {
+		mp_tmr@48240200 {
+			compatible = "arm,mpcore-timers";
+			clock-frequency = < 504000000 >;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg =	< 0x48240200 0x100 >, /* Global Timer Registers */
+				< 0x48240600 0x100 >; /* Private Timer Registers */
+			interrupts = < 27 29 >;
+			interrupt-parent = < &GIC >;
+		};
+
+
+		uart3: serial@48020000 {
 			compatible = "ns16550";
-			reg = <0x20000 0x1000>;
+			reg = <0x48020000 0x1000>;
 			reg-shift = <2>;
 			interrupts = < 68 >;
 			interrupt-parent = <&GIC>;
