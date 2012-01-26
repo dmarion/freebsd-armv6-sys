@@ -252,7 +252,7 @@ arm_tmr_intr(void *arg)
  *	@dev: new device
  *
  *	The probe function returns success when probed with the fdt compatible
- *	string set to "arm,mp_tmr".
+ *	string set to "arm,mpcore-timers".
  *
  *	RETURNS
  *	BUS_PROBE_DEFAULT if the fdt device is compatible, otherwise ENXIO.
@@ -260,7 +260,7 @@ arm_tmr_intr(void *arg)
 static int
 arm_tmr_probe(device_t dev)
 {
-	if (!ofw_bus_is_compatible(dev, "arm,mp_tmr"))
+	if (!ofw_bus_is_compatible(dev, "arm,mpcore-timers"))
 		return (ENXIO);
 	
 	device_set_desc(dev, "ARM Generic MPCORE Timers");
