@@ -687,25 +687,13 @@ static struct pmap_devmap fdt_devmap[FDT_DEVMAP_MAX] = {
 static int
 platform_devmap_init(void)
 {
-	int i;
-
-#if 1	
-	i = 0;
-	fdt_devmap[i].pd_va = fdt_immr_va;
-	fdt_devmap[i].pd_pa = fdt_immr_pa;
-	fdt_devmap[i].pd_size = fdt_immr_size;
-	fdt_devmap[i].pd_prot = VM_PROT_READ | VM_PROT_WRITE;
-	fdt_devmap[i].pd_cache = PTE_NOCACHE;
-	i++;
-#endif
-	i = 0;
-	fdt_devmap[i].pd_va = 0xe1000000;
+	int i = 0;
+	fdt_devmap[i].pd_va = 0xe0000000;
 	fdt_devmap[i].pd_pa = 0x70000000;
 	fdt_devmap[i].pd_size = 0x100000;
 	fdt_devmap[i].pd_prot = VM_PROT_READ | VM_PROT_WRITE;
 	fdt_devmap[i].pd_cache = PTE_NOCACHE;
 	i++;
-
 
 	pmap_devmap_bootstrap_table = &fdt_devmap[0];
 	return (0);
