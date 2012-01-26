@@ -11,7 +11,7 @@ arm/tegra/bus_space.c			standard
 arm/tegra/common.c			standard
 arm/tegra/gic.c				standard
 arm/tegra/tegra2_machdep.c		standard
-arm/tegra/timer.c			standard
+arm/arm/mp_tmr.c			standard
 
 kern/kern_clocksource.c			standard
 
