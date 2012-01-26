@@ -604,9 +604,9 @@ platform_devmap_init(void)
 	 * IMMR range.
 	 */
 	i = 0;
-	fdt_devmap[i].pd_va = fdt_immr_va;
-	fdt_devmap[i].pd_pa = fdt_immr_pa;
-	fdt_devmap[i].pd_size = fdt_immr_size;
+	fdt_devmap[i].pd_va = 0xE8000000;
+	fdt_devmap[i].pd_pa = 0x48000000;
+	fdt_devmap[i].pd_size = 0x01000000;
 	fdt_devmap[i].pd_prot = VM_PROT_READ | VM_PROT_WRITE;
 	fdt_devmap[i].pd_cache = PTE_NOCACHE;
 	i++;
