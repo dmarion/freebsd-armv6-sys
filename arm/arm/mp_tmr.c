@@ -128,7 +128,6 @@ static struct arm_tmr_softc *arm_tmr_sc = NULL;
     bus_space_write_4(arm_tmr_sc->gbl_bst, arm_tmr_sc->gbl_bsh, reg, val)
 
 
-
 static timecounter_get_t arm_tmr_get_timecount;
 
 static struct timecounter arm_tmr_timecount = {
@@ -156,8 +155,6 @@ arm_tmr_get_timecount(struct timecounter *tc)
 	return (tmr_gbl_read_4(GBL_TIMER_COUNT_LOW));
 }
 
-
-
 /**
  *	arm_tmr_start - starts the eventtimer (private) timer
  *	@et: pointer to eventtimer struct
@@ -179,9 +176,9 @@ arm_tmr_start(struct eventtimer *et, struct bintime *first,
 	struct arm_tmr_softc *sc = (struct arm_tmr_softc *)et->et_priv;
 	uint32_t load, count;
 	uint32_t ctrl;
-	
+
 	ctrl = PRV_TIMER_CTRL_IRQ_ENABLE | PRV_TIMER_CTRL_TIMER_ENABLE;
-	
+
 	if (period != NULL) {
 		load = (et->et_frequency * (period->frac >> 32)) >> 32;
 		if (period->sec > 0)
@@ -198,7 +195,7 @@ arm_tmr_start(struct eventtimer *et, struct bintime *first,
 	} else {
 		count = load;
 	}
-	
+
 	tmr_prv_write_4(PRV_TIMER_LOAD, load);
 	tmr_prv_write_4(PRV_TIMER_COUNT, count);
 
@@ -262,7 +259,7 @@ arm_tmr_probe(device_t dev)
 {
 	if (!ofw_bus_is_compatible(dev, "arm,mpcore-timers"))
 		return (ENXIO);
-	
+
 	device_set_desc(dev, "ARM Generic MPCore Timers");
 	return (BUS_PROBE_DEFAULT);
 }
@@ -282,8 +279,8 @@ arm_tmr_attach(device_t dev)
 {
 	struct arm_tmr_softc *sc = device_get_softc(dev);
 	phandle_t node;
-	pcell_t   clock;
-	void	  *ihl;
+	pcell_t clock;
+	void *ihl;
 
 	if (arm_tmr_sc)
 		return (ENXIO);
@@ -310,28 +307,22 @@ arm_tmr_attach(device_t dev)
 	sc->prv_bst = rman_get_bustag(sc->tmr_res[2]);
 	sc->prv_bsh = rman_get_bushandle(sc->tmr_res[2]);
 
-
 	arm_tmr_sc = sc;
-
 
 	/* Disable both timers to start off */
 	tmr_prv_write_4(PRV_TIMER_CTRL, 0x00000000);
 	tmr_gbl_write_4(PRV_TIMER_CTRL, 0x00000000);
 
-
 	/* Setup and enable the global timer to use as the timecounter */
 	tmr_gbl_write_4(GBL_TIMER_CTRL, (0x00 << GBL_TIMER_CTR_PRESCALER_SHIFT) | 
-	                                 GBL_TIMER_CTRL_TIMER_ENABLE);
+					GBL_TIMER_CTRL_TIMER_ENABLE);
 
 	arm_tmr_timecount.tc_frequency = sc->clkfreq;
 	tc_init(&arm_tmr_timecount);
 
-
-
-	
 	/* Setup and enable the timer */
 	if (bus_setup_intr(dev, sc->tmr_res[3], INTR_TYPE_CLK, arm_tmr_intr,
-	                   NULL, sc, &ihl) != 0) {
+			NULL, sc, &ihl) != 0) {
 		bus_release_resources(dev, arm_tmr_spec, sc->tmr_res);
 		device_printf(dev, "Unable to setup the clock irq handler.\n");
 		return (ENXIO);
@@ -412,17 +403,17 @@ DELAY(int usec)
 	int32_t counts_per_usec;
 	int32_t counts;
 	uint32_t first, last;
-	
+
 	/* Check the timers are setup, if not just use a for loop for the meantime */
 	if (arm_tmr_sc == NULL) {
 		for (; usec > 0; usec--)
 			for (counts = 200; counts > 0; counts--)
 				cpufunc_nullop();	/* Prevent gcc from optimizing
-				                     * out the loop
-				                     */
+							 * out the loop
+							 */
 		return;
 	}
-	
+
 	/* Get the number of times to count */
 	counts_per_usec = ((arm_tmr_timecount.tc_frequency / 1000000) + 1);
 
@@ -436,9 +427,9 @@ DELAY(int usec)
 		counts = (0x80000000U / counts_per_usec) - 1;
 	else
 		counts = usec * counts_per_usec;
-	
+
 	first = tmr_gbl_read_4(GBL_TIMER_COUNT_LOW);
-	
+
 	while (counts > 0) {
 		last = tmr_gbl_read_4(GBL_TIMER_COUNT_LOW);
 		counts -= (int32_t)(last - first);
