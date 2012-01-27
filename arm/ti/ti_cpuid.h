@@ -36,9 +36,6 @@
 #define OMAP_REV_MINOR(x)       (((x) >> 4) & 0xf)
 #define OMAP_REV_MINOR_MINOR(x) (((x) >> 0) & 0xf)
 
-#define OMAP3530_DEV            0x3530
-#define OMAP4430_DEV            0x4430
-
 #define OMAP3350_REV_ES1_0      OMAP_MAKEREV(OMAP3530_DEV, 1, 0, 0)
 #define OMAP3530_REV_ES2_0      OMAP_MAKEREV(OMAP3530_DEV, 2, 0, 0)
 #define OMAP3530_REV_ES2_1      OMAP_MAKEREV(OMAP3530_DEV, 2, 1, 0)
@@ -52,8 +49,8 @@
 #define OMAP4430_REV_ES2_2      OMAP_MAKEREV(OMAP4430_DEV, 2, 2, 0)
 #define OMAP4430_REV_ES2_3      OMAP_MAKEREV(OMAP4430_DEV, 2, 3, 0)
 
-#define	CHIP_OMAP_3	0
-#define	CHIP_OMAP_4	1
+#define CHIP_OMAP_3	0
+#define CHIP_OMAP_4	1
 
 static __inline int ti_chip(void)
 {
