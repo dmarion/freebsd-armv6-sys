@@ -12,7 +12,6 @@ arm/arm/irq_dispatch.S				standard
 
 arm/ti/ti_machdep.c				standard
 arm/ti/aintc.c					standard
-arm/omap/omap_space_asm.S			standard
 
 arm/ti/am335x/timer.c				standard
 
