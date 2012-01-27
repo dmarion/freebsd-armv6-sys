@@ -46,7 +46,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/resource.h>
 #include <machine/intr.h>
 
-#include <arm/omap/omapvar.h>
+#include <arm/ti/tivar.h>
 #include <arm/ti/ti_cpuid.h>
 
 #include <arm/omap/omap4/omap44xx_reg.h>
