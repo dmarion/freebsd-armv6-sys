@@ -14,14 +14,6 @@ arm/arm/gic.c					standard
 arm/arm/mp_tmr.c				standard
 
 arm/ti/ti_machdep.c				standard
-#arm/omap/omap_cpuid.c				standard
-arm/omap/omap_prcm.c				standard
-arm/omap/omap_scm.c				standard
-arm/omap/omap_if.m				standard
 arm/omap/omap_space_asm.S			standard
-
-arm/omap/omap4/omap4_if.m			standard
-arm/omap/omap4/omap4_prcm_clks.c		standard
-arm/omap/omap4/omap4_scm_padconf.c		standard
 
 dev/uart/uart_dev_ns8250.c			optional	uart
