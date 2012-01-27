@@ -14,6 +14,5 @@ arm/arm/gic.c					standard
 arm/arm/mp_tmr.c				standard
 
 arm/ti/ti_machdep.c				standard
-arm/omap/omap_space_asm.S			standard
 
 dev/uart/uart_dev_ns8250.c			optional	uart

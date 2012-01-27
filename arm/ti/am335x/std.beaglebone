@@ -1,4 +1,4 @@
 # $FreeBSD$
 
 include	"../ti/am335x/std.am335x"
-#files	"../ti/am335x/files.beaglebone"
+files	"../ti/am335x/files.beaglebone"
