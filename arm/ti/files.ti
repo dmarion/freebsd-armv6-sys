@@ -1,0 +1,5 @@
+# $FreeBSD$
+
+arm/ti/ti_cpuid.c				standard
+arm/ti/bus_space.c				standard
+arm/ti/common.c					standard
