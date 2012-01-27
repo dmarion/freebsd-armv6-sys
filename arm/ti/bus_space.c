@@ -40,7 +40,7 @@ __FBSDID("$FreeBSD$");
 
 /* Prototypes for all the bus_space structure functions */
 bs_protos(generic);
-bs_protos(generic_armv7);
+bs_protos(generic_armv4);
 
 struct bus_space _base_tag = {
 	/* cookie */

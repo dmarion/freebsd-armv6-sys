@@ -60,7 +60,7 @@
 #else
 #define PTE_NOCACHE	1
 #endif
-#define PTE_CACHE	6
+#define PTE_CACHE	4
 #define PTE_PAGETABLE	4
 
 enum mem_type {

@@ -65,7 +65,7 @@
 			compatible = "ns16550";
 			reg = <0x44E09000 0x1000>;
 			reg-shift = <2>;
-			interrupts = < 68 >;
+			interrupts = < 72 >;
 			interrupt-parent = <&AINTC>;
 			clock-frequency = < 48000000 >; /* FIXME */
 		};
