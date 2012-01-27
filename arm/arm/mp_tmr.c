@@ -132,7 +132,7 @@ static struct arm_tmr_softc *arm_tmr_sc = NULL;
 static timecounter_get_t arm_tmr_get_timecount;
 
 static struct timecounter arm_tmr_timecount = {
-	.tc_name           = "ARM MPCORE Timecouter",
+	.tc_name           = "ARM MPCore Timecouter",
 	.tc_get_timecount  = arm_tmr_get_timecount,
 	.tc_poll_pps       = NULL,
 	.tc_counter_mask   = ~0u,
@@ -263,7 +263,7 @@ arm_tmr_probe(device_t dev)
 	if (!ofw_bus_is_compatible(dev, "arm,mpcore-timers"))
 		return (ENXIO);
 	
-	device_set_desc(dev, "ARM Generic MPCORE Timers");
+	device_set_desc(dev, "ARM Generic MPCore Timers");
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -337,7 +337,7 @@ arm_tmr_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	sc->et.et_name = "ARM MPCORE Eventtimer";
+	sc->et.et_name = "ARM MPCore Eventtimer";
 	sc->et.et_flags = ET_FLAGS_PERIODIC | ET_FLAGS_ONESHOT | ET_FLAGS_PERCPU;
 	sc->et.et_quality = 1000;
 
