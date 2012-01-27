@@ -102,15 +102,16 @@ omap4_get_revision(void)
 	 * 0x4A00_2218.  This is part of the L4_CORE memory range and should have
 	 * been mapped in by the machdep.c code.
 	 *
-	 *   STD_FUSE_DIE_ID_0    0x4A00 2200 
+	 *   STD_FUSE_DIE_ID_0    0x4A00 2200
 	 *   ID_CODE              0x4A00 2204   (this is the only one we need)
-	 *   STD_FUSE_DIE_ID_1    0x4A00 2208 
-	 *   STD_FUSE_DIE_ID_2    0x4A00 220C 
-	 *   STD_FUSE_DIE_ID_3    0x4A00 2210 
-	 *   STD_FUSE_PROD_ID_0   0x4A00 2214 
+	 *   STD_FUSE_DIE_ID_1    0x4A00 2208
+	 *   STD_FUSE_DIE_ID_2    0x4A00 220C
+	 *   STD_FUSE_DIE_ID_3    0x4A00 2210
+	 *   STD_FUSE_PROD_ID_0   0x4A00 2214
 	 *   STD_FUSE_PROD_ID_1   0x4A00 2218
 	 */
-	// id_code = REG_READ32(OMAP44XX_L4_CORE_VBASE + OMAP4_ID_CODE);
+	// id_code = REG_READ32(OMAP44XX_L4_CORE_VBASE + OMAP4_ID_CODE); 
+	//FIXME Should we map somewhere else?
 	bus_space_map(fdtbus_bs_tag,OMAP44XX_L4_CORE_HWBASE, 0x4000, 0, &bsh);
 	id_code = bus_space_read_4(fdtbus_bs_tag, bsh, OMAP4_ID_CODE);
 	bus_space_unmap(fdtbus_bs_tag, bsh, 0x4000);
@@ -169,6 +170,7 @@ omap3_get_revision(void)
 	uint32_t id_code;
 	uint32_t revision;
 	uint32_t hawkeye;
+	bus_space_handle_t bsh;
 
 	/* The chip revsion is read from the device identification registers and
 	 * the JTAG (?) tap registers, which are located in address 0x4A00_2200 to
@@ -179,7 +181,10 @@ omap3_get_revision(void)
 	 *
 	 *
 	 */
-	id_code = REG_READ32(OMAP35XX_L4_WAKEUP_VBASE + OMAP3_ID_CODE);
+	//id_code = REG_READ32(OMAP35XX_L4_WAKEUP_VBASE + OMAP3_ID_CODE);
+	bus_space_map(fdtbus_bs_tag,OMAP35XX_L4_WAKEUP_HWBASE, 0x10000, 0, &bsh);
+	id_code = bus_space_read_4(fdtbus_bs_tag, bsh, OMAP3_ID_CODE);
+	bus_space_unmap(fdtbus_bs_tag, bsh, 0x4000);
 
 	hawkeye = ((id_code >> 12) & 0xffff);
 	revision = ((id_code >> 28) & 0xf);
