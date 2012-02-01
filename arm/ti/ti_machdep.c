@@ -37,6 +37,7 @@
 
 #include "opt_ddb.h"
 #include "opt_platform.h"
+#include "opt_global.h"
 
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
@@ -153,6 +154,147 @@ static void print_kernel_section_addr(void);
 
 static void physmap_init(void);
 static int platform_devmap_init(void);
+
+/*
+ *  Early Print 
+ */
+#define DEBUGBUF_SIZE 256
+#define LSR_THRE    0x20	/* Xmit holding register empty */
+#if defined(SOC_TI_AM335X)
+#define EARLY_UART_VA_BASE	0xE4E09000
+#define EARLY_UART_PA_BASE	0x44E09000
+#elif defined(SOC_OMAP4)
+#define EARLY_UART_VA_BASE	0xE8020000
+#define EARLY_UART_PA_BASE	0x48020000
+#else
+#error "DAMN"
+#endif
+char debugbuf[DEBUGBUF_SIZE];
+
+void early_putstr(unsigned char *str)
+{
+	volatile uint8_t *p_lsr = (volatile uint8_t*) (EARLY_UART_VA_BASE + 0x14);
+	volatile uint8_t *p_thr = (volatile uint8_t*) (EARLY_UART_VA_BASE + 0x00);
+	
+	do {
+		while ((*p_lsr & LSR_THRE) == 0);
+		*p_thr = *str;
+
+		if (*str == '\n')
+		{
+			while ((*p_lsr & LSR_THRE) == 0);
+			*p_thr = '\r';
+		}
+	} while (*++str != '\0');
+}
+
+#if (STARTUP_PAGETABLE_ADDR < PHYSADDR) || \
+    (STARTUP_PAGETABLE_ADDR > (PHYSADDR + (64 * 1024 * 1024)))
+#error STARTUP_PAGETABLE_ADDR is not within init. MMU table, early print support not possible
+#endif
+
+void
+early_print_init(void)
+{
+	volatile uint32_t *mmu_tbl = (volatile uint32_t*)STARTUP_PAGETABLE_ADDR;
+	mmu_tbl[(EARLY_UART_VA_BASE >> L1_S_SHIFT)] = L1_TYPE_S | L1_S_AP(AP_KRW) | (EARLY_UART_PA_BASE & L1_S_FRAME);
+	__asm __volatile ("mcr	p15, 0, r0, c8, c7, 0");	/* invalidate I+D TLBs */
+	__asm __volatile ("mcr	p15, 0, r0, c7, c10, 4");	/* drain the write buffer */
+	early_putstr("Early printf initialise\n");
+}
+
+#define EPRINTF(args...) \
+	snprintf(debugbuf,DEBUGBUF_SIZE, ##args ); \
+	early_putstr(debugbuf);
+
+void early_a(uint8_t x) {
+	char c[5];
+	c[0]='a';
+	c[1]='0'+x;
+	c[2]='-';
+	c[3]='\n';
+	c[3]=0;
+	early_putstr(c);
+}
+
+void
+dump_l2pagetable(uint32_t pta, uint32_t l1)
+{
+	int i;
+	volatile uint32_t *pt = (volatile uint32_t*)pta;
+
+	for (i=0; i<256;i++) {
+		switch (pt[i] & 0x3) {
+			case 1:
+				EPRINTF("0x%08x -> 0x%08x 64K ",(i<<12) | l1,
+					pt[i]&0xFFFF0000);
+				EPRINTF("l2pt[0x%03x]=0x%08x ",i, pt[i]);
+				EPRINTF("s=%u ",	(pt[i]>>10) &0x1);
+				EPRINTF("apx=%u ",	(pt[i]>> 9) &0x1);
+				EPRINTF("tex=%u ",	(pt[i]>>12) &0x7);
+				EPRINTF("ap=%u ",	(pt[i]>> 4) &0x3);
+				EPRINTF("c=%u ",	(pt[i]>> 3) &0x1);
+				EPRINTF("b=%u\n",	(pt[i]>> 2) &0x1);
+				break;
+			case 2:
+			case 3:
+				EPRINTF("0x%08x -> 0x%08x  4K ",(i<<12) | l1,
+					pt[i]&0xFFFFF000);
+				EPRINTF("l2pt[0x%03x]=0x%08x ",i, pt[i]);
+				EPRINTF("s=%u ",	(pt[i]>>10) &0x1);
+				EPRINTF("apx=%u ",	(pt[i]>> 9) &0x1);
+				EPRINTF("tex=%u ",	(pt[i]>> 6) &0x7);
+				EPRINTF("ap=%u ",	(pt[i]>> 4) &0x3);
+				EPRINTF("c=%u ",	(pt[i]>> 3) &0x1);
+				EPRINTF("b=%u\n",	(pt[i]>> 2) &0x1);
+				break;
+		}
+	}
+}
+
+void
+dump_l1pagetable(uint32_t pta)
+{
+	int i;
+	EPRINTF("L1 pagetable starts at 0x%08x\n",pta);
+	volatile uint32_t *pt = (volatile uint32_t*)pta;
+	for (i=0; i<4096;i++) {
+		switch (pt[i] & 0x3) {
+			case 1:
+				EPRINTF("0x%08x ->             L2 ",i<<20);
+				EPRINTF("l1pt[0x%03x]=0x%08x ",i, pt[i]);
+				EPRINTF("l2desc=0x%08x ",pt[i] & 0xFFFFFC00);
+				EPRINTF("p=%u ",(pt[i]>>9) &0x1);
+				EPRINTF("domain=0x%x\n",(pt[i]>>5) &0xF);
+				//dump_l2pagetable(pt[i] & 0xFFFFFC00, i<<20);
+				break;
+			case 2:
+				if (pt[i] &0x40000) {
+					EPRINTF("0x%08x -> 0x%08x 16M ",i<<20, pt[i] & 0xFF000000);
+					EPRINTF("l1pt[0x%03x]=0x%08x ",i, pt[i]);
+					EPRINTF("base=0x%02x ", ((pt[i]>>24)));
+				} else {
+					EPRINTF("0x%08x -> 0x%08x  1M ",i<<20, pt[i] & 0xFFF00000);
+					EPRINTF("l1pt[0x%03x]=0x%08x ",i, pt[i]);
+					EPRINTF("base=0x%03x ", (pt[i]>>20));
+				}
+				EPRINTF("nG=%u ",	(pt[i]>>17) &0x1);
+				EPRINTF("s=%u ",	(pt[i]>>16) &0x1);
+				EPRINTF("apx=%u ",	(pt[i]>>15) &0x1);
+				EPRINTF("tex=%u ",	(pt[i]>>12) &0x7);
+				EPRINTF("ap=%u ",	(pt[i]>>10) &0x3);
+				EPRINTF("p=%u ",	(pt[i]>> 9) &0x1);
+				EPRINTF("domain=0x%x ",	(pt[i]>> 5) &0xF);
+				EPRINTF("xn=%u ",	(pt[i]>> 4) &0x1);
+				EPRINTF("c=%u ",	(pt[i]>> 3) &0x1);
+				EPRINTF("b=%u\n",	(pt[i]>> 2) &0x1);
+				break;
+			case 3:
+				EPRINTF("pt[0x%03x] 0x%08x RESV\n",i, pt[i]);
+				break;
+		}
+	}
+}
 
 static char *
 kenv_next(char *cp)
@@ -292,6 +434,24 @@ physmap_init(void)
 	phys_avail[j + 1] = 0;
 }
 
+void CP15ICacheFlush(void)
+{
+    __asm __volatile("    mov     r0, #0\n\t" 
+        "    mcr     p15, #0, r0, c7, c5, #0\n\t");
+}
+
+void CP15Ttb0Set(unsigned int ttb)
+{
+   /* sets translation table base resgister with page table 
+    * starting address.
+    */ 
+    __asm __volatile("   mcr p15, #0, %[value], c2, c0, 0":: [value] "r" (ttb));
+//    __asm __volatile("   mcr p15, #0, %[value], c2, c0, 0":: [value] "r" (ttb));
+    __asm __volatile("   dsb");
+    __asm __volatile("   isb");
+
+}
+
 void *
 initarm(void *mdp, void *unused __unused)
 {
@@ -308,6 +468,7 @@ initarm(void *mdp, void *unused __unused)
 	memsize = 0;
 	dtbp = (vm_offset_t)NULL;
 
+	early_print_init();
 	set_cpufuncs();
 
 	/*
@@ -352,21 +513,25 @@ initarm(void *mdp, void *unused __unused)
 	if (OF_install(OFW_FDT, 0) == FALSE)
 		while (1);
 
+	EPRINTF("x1\n");
 	if (OF_init((void *)dtbp) != 0)
 		while (1);
+	EPRINTF("x2\n");
 
 	/* Grab physical memory regions information from device tree. */
 	if (fdt_get_mem_regions(availmem_regions, &availmem_regions_sz,
 	    &memsize) != 0)
 		while(1);
+	EPRINTF("x3\n");
 
-	if (fdt_immr_addr(OMAP44XX_L4_PERIPH_VBASE) != 0)
-		while (1);
+//	if (fdt_immr_addr(OMAP44XX_L4_PERIPH_VBASE) != 0)
+//		while (1);
 
-	/* Platform-specific initialisation */
-	pmap_bootstrap_lastaddr = fdt_immr_va - ARM_NOCACHE_KVA_SIZE;
+	/* Platform-specific initialisation FIXME */
+	pmap_bootstrap_lastaddr = 0xE0000000 - ARM_NOCACHE_KVA_SIZE;
 
 	pcpu0_init();
+	EPRINTF("x4\n");
 
 	/* Calculate number of L2 tables needed for mapping vm_page_array */
 	l2size = (memsize / PAGE_SIZE) * sizeof(struct vm_page);
@@ -422,6 +587,7 @@ initarm(void *mdp, void *unused __unused)
 	/* Allocate dynamic per-cpu area. */
 	valloc_pages(dpcpu, DPCPU_SIZE / PAGE_SIZE);
 	dpcpu_init((void *)dpcpu.pv_va, 0);
+	EPRINTF("x5\n");
 
 	/* Allocate stacks for all modes */
 	valloc_pages(irqstack, (IRQ_STACK_SIZE * MAXCPU));
@@ -452,6 +618,7 @@ initarm(void *mdp, void *unused __unused)
 	for (i = 0 ; i < l2size - 1; i++)
 		pmap_link_l2pt(l1pagetable, l2_start + i * L1_S_SIZE,
 		    &kernel_pt_table[i]);
+	EPRINTF("x6\n");
 
 	pmap_curmaxkvaddr = l2_start + (l2size - 1) * L1_S_SIZE;
 	
@@ -459,47 +626,129 @@ initarm(void *mdp, void *unused __unused)
 	pmap_map_chunk(l1pagetable, KERNVIRTADDR, KERNPHYSADDR,
 	   (((uint32_t)(lastaddr) - KERNVIRTADDR) + PAGE_MASK) & ~PAGE_MASK,
 	    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	EPRINTF("x7\n");
 
 
 	/* Map L1 directory and allocated L2 page tables */
 	pmap_map_chunk(l1pagetable, kernel_l1pt.pv_va, kernel_l1pt.pv_pa,
 	    L1_TABLE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_PAGETABLE);
+	EPRINTF("x8\n");
 
 	pmap_map_chunk(l1pagetable, kernel_pt_table[0].pv_va,
 	    kernel_pt_table[0].pv_pa,
 	    L2_TABLE_SIZE_REAL * l2size,
 	    VM_PROT_READ|VM_PROT_WRITE, PTE_PAGETABLE);
+	EPRINTF("x9\n");
 
 	/* Map allocated DPCPU, stacks and msgbuf */
 	pmap_map_chunk(l1pagetable, dpcpu.pv_va, dpcpu.pv_pa,
 	    freemempos - dpcpu.pv_va,
 	    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	EPRINTF("x10\n");
 
 	/* Link and map the vector page */
 	pmap_link_l2pt(l1pagetable, ARM_VECTORS_HIGH,
 	    &kernel_pt_table[l2size - 1]);
 	pmap_map_entry(l1pagetable, ARM_VECTORS_HIGH, systempage.pv_pa,
 	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE, PTE_CACHE);
+	EPRINTF("x11\n");
 
 	/* Map pmap_devmap[] entries */
 	if (platform_devmap_init() != 0)
 		while (1);
+	EPRINTF("x12\n");
+	
 	pmap_devmap_bootstrap(l1pagetable, pmap_devmap_bootstrap_table);
+	EPRINTF("x13\n");
 
 	cpu_domains((DOMAIN_CLIENT << (PMAP_DOMAIN_KERNEL * 2)) |
 	    DOMAIN_CLIENT);
+	EPRINTF("x14 kernel_l1pt.pv_pa=0x%08x\n", kernel_l1pt.pv_pa);
 	pmap_pa = kernel_l1pt.pv_pa;
+
+	EPRINTF("x14.xxx arm_cache_level=0x%08x arm_cache_loc=%u\n",
+		arm_cache_level, arm_cache_loc);
+	int u=0;
+	for(u=0;u<14;u++) {
+		EPRINTF("arm_cache_type[%u]=0x%08x\n",u,arm_cache_type[u]);
+	}
+
+	uint32_t cr,acr, l2cacr, myttb,xx,yy;
+	__asm __volatile("mrc p15, 0, %0, c1, c0, 0" : "=r"(cr));
+	__asm __volatile("mrc p15, 0, %0, c1, c0, 1" : "=r"(acr));
+	__asm __volatile("mrc p15, 1, %0, c9, c0, 2" : "=r"(l2cacr));
+	EPRINTF("CR     = 0x%08x\n",cr);
+	EPRINTF("ACR    = 0x%08x\n",acr);
+	EPRINTF("L2CACR = 0x%08x\n",l2cacr);
+	cr &= ~(1<<2);
+	acr &= ~(1<<1);
+	EPRINTF("CR     = 0x%08x\n",cr);
+	EPRINTF("ACR    = 0x%08x\n",acr);
+	EPRINTF("L2CACR = 0x%08x\n",l2cacr);
+
+	xx=0;
+	__asm __volatile("mcr    p15, 2, %0, c0, c0, 0" : : "r" (xx));
+	__asm __volatile("isb");
+	__asm __volatile("mrc    p15, 1, %0, c0, c0, 0" : "=r" (yy)); // CSIDR
+	EPRINTF("CSIDR[%x]=0x%08x\n",xx,yy);
+	xx=1;
+	__asm __volatile("mcr    p15, 2, %0, c0, c0, 0" : : "r" (xx));
+	__asm __volatile("isb");
+	__asm __volatile("mrc    p15, 1, %0, c0, c0, 0" : "=r" (yy)); // CSIDR
+	EPRINTF("CSIDR[%x]=0x%08x\n",xx,yy);
+	xx=2;
+	__asm __volatile("mcr    p15, 2, %0, c0, c0, 0" : : "r" (xx));
+	__asm __volatile("isb");
+	__asm __volatile("mrc    p15, 1, %0, c0, c0, 0" : "=r" (yy)); // CSIDR
+	EPRINTF("CSIDR[%x]=0x%08x\n",xx,yy);
+	xx=3;
+	__asm __volatile("mcr    p15, 2, %0, c0, c0, 0" : : "r" (xx));
+	__asm __volatile("isb");
+	__asm __volatile("mrc    p15, 1, %0, c0, c0, 0" : "=r" (yy)); // CSIDR
+	EPRINTF("CSIDR[%x]=0x%08x\n",xx,yy);
+	
+
+//	__asm __volatile("mcr p15, 0, %0, c1, c0, 0" : "=r"(cr));
+//	__asm __volatile("mcr p15, 0, %0, c1, c0, 1" : "=r"(acr));
+//	cr |= 1<<2;
+//	EPRINTF("CR = 0x%08x\n",cr);
+//	__asm __volatile("mcr p15, 0, %0, c1, c0, 0" : "=r"(cr));
+
+//	__asm __volatile("mrc p15, 0, %0, c1, c0, 0" : "=r"(cr));
+//	EPRINTF("CR = 0x%08x\n",cr);
+
+//	__asm __volatile("mrc p15, 1, %0, c9, c0, 2" : "=r"(clidr));
+//	EPRINTF("L2CACR = 0x%08x\n",clidr);
+
+        __asm __volatile("   mrc p15, #0, %0, c2, c0, 0" : "=r" (myttb));
+//	dump_l1pagetable(STARTUP_PAGETABLE_ADDR);
+//	dump_l1pagetable(l1pagetable);
+	EPRINTF("TTB=0x%08x\n",myttb);
+	__asm __volatile("isb");
+	__asm __volatile("dsb");
+	__asm __volatile("mcr    p15, 0, %0, c8, c7, 0" : : "r" (0));
+	__asm __volatile("isb");
+	__asm __volatile("dsb");
+	__asm __volatile("dmb");
+	EPRINTF("TEST\n");
 	setttb(kernel_l1pt.pv_pa);
-	cpu_tlb_flushID();
+	EPRINTF("x15 OK\n");
+//	cpu_tlb_flushID();
+	EPRINTF("x16\n");
+	EPRINTF("kernel_l1pt.pv_pa=0x%08x\n",kernel_l1pt.pv_pa);
+        __asm __volatile("   mrc p15, #0, %0, c2, c0, 0" : "=r" (myttb));
+	EPRINTF("TTB=0x%08x\n",myttb);
 	cpu_domains(DOMAIN_CLIENT << (PMAP_DOMAIN_KERNEL * 2));
+	EPRINTF("x17\n");
 
 	/*
 	 * Only after the SOC registers block is mapped we can perform device
 	 * tree fixups, as they may attempt to read parameters from hardware.
 	 */
 	OF_interpret("perform-fixup", 0);
-
+	EPRINTF("cninit\n");
 	cninit();
+	EPRINTF("cninit done\n");
 
 	physmem = memsize / PAGE_SIZE;
 
@@ -507,8 +756,11 @@ initarm(void *mdp, void *unused __unused)
 	debugf(" arg1 mdp = 0x%08x\n", (uint32_t)mdp);
 	debugf(" boothowto = 0x%08x\n", boothowto);
 	debugf(" dtbp = 0x%08x\n", (uint32_t)dtbp);
+	EPRINTF("cninit done1\n");
 	print_kernel_section_addr();
+	EPRINTF("cninit done2\n");
 	print_kenv();
+	EPRINTF("cninit done3\n");
 
 	/*
 	 * Pages were allocated during the secondary bootstrap for the
@@ -519,6 +771,7 @@ initarm(void *mdp, void *unused __unused)
 	 * of the stack memory.
 	 */
 	cpu_control(CPU_CONTROL_MMU_ENABLE, CPU_CONTROL_MMU_ENABLE);
+ 	EPRINTF("cninit done4\n");
 
 	set_stackptrs(0);
 
@@ -597,19 +850,22 @@ static struct pmap_devmap fdt_devmap[FDT_DEVMAP_MAX] = {
 static int
 platform_devmap_init(void)
 {
-	phandle_t root, child;
-	int i;
-
-	/*
-	 * IMMR range.
-	 */
-	i = 0;
+	int i = 0;
+#if defined(SOC_OMAP4)
 	fdt_devmap[i].pd_va = 0xE8000000;
 	fdt_devmap[i].pd_pa = 0x48000000;
-	fdt_devmap[i].pd_size = 0x01000000;
+	fdt_devmap[i].pd_size = 0x1000000;
 	fdt_devmap[i].pd_prot = VM_PROT_READ | VM_PROT_WRITE;
 	fdt_devmap[i].pd_cache = PTE_NOCACHE;
 	i++;
+#elif defined(SOC_TI_AM335X)
+	fdt_devmap[i].pd_va = 0xE4C00000;
+	fdt_devmap[i].pd_pa = 0x44C00000;	/* L4_WKUP */
+	fdt_devmap[i].pd_size = 0x400000;	/* 4 MB */
+	fdt_devmap[i].pd_prot = VM_PROT_READ | VM_PROT_WRITE;
+	fdt_devmap[i].pd_cache = PTE_NOCACHE;
+	i++;
+#endif
 
 	pmap_devmap_bootstrap_table = &fdt_devmap[0];
 	return (0);
