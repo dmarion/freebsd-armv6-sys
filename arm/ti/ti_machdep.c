@@ -37,6 +37,7 @@
 
 #include "opt_ddb.h"
 #include "opt_platform.h"
+#include "opt_global.h"
 
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
@@ -360,11 +361,11 @@ initarm(void *mdp, void *unused __unused)
 	    &memsize) != 0)
 		while(1);
 
-	if (fdt_immr_addr(OMAP44XX_L4_PERIPH_VBASE) != 0)
-		while (1);
+//	if (fdt_immr_addr(OMAP44XX_L4_PERIPH_VBASE) != 0)
+//		while (1);
 
 	/* Platform-specific initialisation */
-	pmap_bootstrap_lastaddr = fdt_immr_va - ARM_NOCACHE_KVA_SIZE;
+	pmap_bootstrap_lastaddr = 0xE0000000 - ARM_NOCACHE_KVA_SIZE;
 
 	pcpu0_init();
 
@@ -598,18 +599,24 @@ static int
 platform_devmap_init(void)
 {
 	phandle_t root, child;
-	int i;
-
-	/*
-	 * IMMR range.
-	 */
-	i = 0;
+	int i = 0;
+#if defined(SOC_OMAP4)
 	fdt_devmap[i].pd_va = 0xE8000000;
 	fdt_devmap[i].pd_pa = 0x48000000;
-	fdt_devmap[i].pd_size = 0x01000000;
+	fdt_devmap[i].pd_size = 0x1000000;
 	fdt_devmap[i].pd_prot = VM_PROT_READ | VM_PROT_WRITE;
 	fdt_devmap[i].pd_cache = PTE_NOCACHE;
 	i++;
+#elif defined(SOC_TI_AM335X)
+	fdt_devmap[i].pd_va = 0xE4C00000;
+	fdt_devmap[i].pd_pa = 0x44C00000;       /* L4_WKUP */
+	fdt_devmap[i].pd_size = 0x400000;       /* 4 MB */
+	fdt_devmap[i].pd_prot = VM_PROT_READ | VM_PROT_WRITE;
+	fdt_devmap[i].pd_cache = PTE_NOCACHE;
+	i++;
+#else
+#error "Unknown SoC"
+#endif
 
 	pmap_devmap_bootstrap_table = &fdt_devmap[0];
 	return (0);
