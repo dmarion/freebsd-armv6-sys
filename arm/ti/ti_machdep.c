@@ -87,7 +87,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/bus.h>
 #include <sys/reboot.h>
 
-#include <arm/omap/omap4/omap44xx_reg.h>
+#include <arm/ti/omap4/omap44xx_reg.h>
 
 #ifdef  DEBUG
 #define debugf(fmt, args...) printf(fmt, ##args)

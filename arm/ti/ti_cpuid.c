@@ -49,8 +49,8 @@ __FBSDID("$FreeBSD$");
 #include <arm/ti/tivar.h>
 #include <arm/ti/ti_cpuid.h>
 
-#include <arm/omap/omap4/omap44xx_reg.h>
-#include <arm/omap/omap3/omap35xx_reg.h>
+#include <arm/ti/omap4/omap44xx_reg.h>
+#include <arm/ti/omap3/omap35xx_reg.h>
 
 #define OMAP4_STD_FUSE_DIE_ID_0    0x2200
 #define OMAP4_ID_CODE              0x2204
