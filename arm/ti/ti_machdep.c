@@ -452,6 +452,47 @@ void CP15Ttb0Set(unsigned int ttb)
 
 }
 
+void CP15BranchPredictorInvalidate(void)
+{
+    __asm __volatile("    mcr p15, #0, r0, c7, c5, #6"); 
+}
+
+void CP15BranchPredictionEnable(void)
+{
+    __asm __volatile("    mrc p15, #0, r0, c1, c0, #0\n\t"
+        "    orr r0, r0, #0x00000800\n\t"
+        "    mcr p15, #0, r0, c1, c0, #0\n\t");
+}
+
+void CP15DomainAccessClientSet(void)
+{
+    __asm __volatile("    ldr r0, =0x55555555 \n\t"
+        "    mcr p15, 0, r0, c3, c0, 0"); 
+}
+
+void CP15TlbInvalidate(void)
+{
+   /* Invalidates all TLBs.Domain access is selected as
+    * client by configuring domain access register,
+    * in that case access controlled by permission value
+    * set by page table entry
+    */  
+    __asm __volatile("   mov r1, #0\n\t"
+        "   mcr p15, #0, r1, c8, c7, #0\n\t"
+        "   ldr r1, =0x55555555\n\t"
+        "   mcr p15, #0, r1, c3, c0, #0\n\t");
+}
+
+
+void CP15ICacheEnable(void)
+{
+    __asm __volatile("    mrc     p15, #0, r0, c1, c0, #0\n\t"
+        "    orr     r0,  r0, #0x00001000 \n\t"
+        "    mcr     p15, #0, r0, c1, c0, #0 \n\t");
+}
+
+
+
 void *
 initarm(void *mdp, void *unused __unused)
 {
@@ -708,6 +749,14 @@ initarm(void *mdp, void *unused __unused)
 	EPRINTF("CSIDR[%x]=0x%08x\n",xx,yy);
 	
 
+	CP15TlbInvalidate();
+        CP15BranchPredictorInvalidate();
+       CP15BranchPredictionEnable();
+       CP15DomainAccessClientSet();
+       CP15ICacheFlush();
+       CP15ICacheEnable();
+       early_putstr("OK44\n");
+	
 //	__asm __volatile("mcr p15, 0, %0, c1, c0, 0" : "=r"(cr));
 //	__asm __volatile("mcr p15, 0, %0, c1, c0, 1" : "=r"(acr));
 //	cr |= 1<<2;
@@ -723,16 +772,13 @@ initarm(void *mdp, void *unused __unused)
         __asm __volatile("   mrc p15, #0, %0, c2, c0, 0" : "=r" (myttb));
 //	dump_l1pagetable(STARTUP_PAGETABLE_ADDR);
 //	dump_l1pagetable(l1pagetable);
+	early_putstr("armv7_dcache_wbinv_all\n");
+	armv7_dcache_wbinv_all();
 	EPRINTF("TTB=0x%08x\n",myttb);
-	__asm __volatile("isb");
-	__asm __volatile("dsb");
-	__asm __volatile("mcr    p15, 0, %0, c8, c7, 0" : : "r" (0));
-	__asm __volatile("isb");
-	__asm __volatile("dsb");
-	__asm __volatile("dmb");
-	EPRINTF("TEST\n");
+//	CP15TlbInvalidate();
 	setttb(kernel_l1pt.pv_pa);
 	EPRINTF("x15 OK\n");
+	EPRINTF("TTB_0x%08x\n",myttb);
 //	cpu_tlb_flushID();
 	EPRINTF("x16\n");
 	EPRINTF("kernel_l1pt.pv_pa=0x%08x\n",kernel_l1pt.pv_pa);

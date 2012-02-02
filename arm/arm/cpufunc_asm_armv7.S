@@ -50,7 +50,7 @@ ENTRY(armv7_setttb)
  	bl      _C_LABEL(armv7_idcache_wbinv_all) /* clean the D cache */
  	ldmia   sp!, {r0, lr}
  	mcr	p15, 0, r0, c2, c0, 0	/* Translation Table Base Register 0 (TTBR0) */
- 	mcr     p15, 0, r0, c8, c7, 0   /* invalidate I+D TLBs */
+// 	mcr     p15, 0, r0, c8, c7, 0   /* invalidate I+D TLBs */
 	RET
 
 ENTRY(armv7_tlb_flushID)
