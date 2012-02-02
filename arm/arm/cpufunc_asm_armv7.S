@@ -118,7 +118,6 @@ Skip:
 	bne Loop1
 Finished:
 	isb
-	mcr	p15, 0, r0, c7, c5, 5
 	ldmia	sp!, {r4, r5, r6, r7, r8, r9}
 	RET
 
