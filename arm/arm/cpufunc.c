@@ -1064,9 +1064,6 @@ get_cachetype_cp15()
 	u_int clevel, csize, i, sel;
 	u_int multiplier;
 	u_char type;
-#define DEBUGBUF_SIZE 512
-	char debugbuf[DEBUGBUF_SIZE];
-	
 
 	__asm __volatile("mrc p15, 0, %0, c0, c0, 1"
 		: "=r" (ctype));
@@ -1082,10 +1079,6 @@ get_cachetype_cp15()
 	if (ctype == cpuid)
 		goto out;
 
-#define EPRINTF(args...) \
- 	snprintf(debugbuf,DEBUGBUF_SIZE, ##args ); \
- 	early_putstr(debugbuf);
-
 	if (CPU_CT_FORMAT(ctype) == CPU_CT_ARMV7) {
 		__asm __volatile("mrc p15, 1, %0, c0, c0, 1"
 		    : "=r" (clevel));
@@ -1093,14 +1086,11 @@ get_cachetype_cp15()
 		arm_cache_loc = CPU_CLIDR_LOC(arm_cache_level);
 		i = 0;
 		while ((type = (clevel & 0x7)) && i < 7) {
-			EPRINTF("cache type=%u i=%u\n",type,i);
 			if (type == CACHE_DCACHE || type == CACHE_UNI_CACHE ||
 			    type == CACHE_SEP_CACHE) {
 				sel = i << 1;
-				EPRINTF("cache X sel=%u\n",sel);
 				__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
 				    : : "r" (sel));
-				__asm __volatile("isb");
 				__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
 				    : "=r" (csize));
 				arm_cache_type[sel] = csize;
@@ -1110,7 +1100,6 @@ get_cachetype_cp15()
 			}
 			if (type == CACHE_ICACHE || type == CACHE_SEP_CACHE) {
 				sel = (i << 1) | 1;
-				EPRINTF("cache Y sel=%u\n",sel);
 				__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
 				    : : "r" (sel));
 				__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
