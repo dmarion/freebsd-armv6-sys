@@ -122,44 +122,6 @@ Finished:
 	ldmia	sp!, {r4, r5, r6, r7, r8, r9}
 	RET
 
-ENTRY(armv7_dcache_wbinv_all2)
-	push    {r4-r11}
-	dmb
-	mrc    p15, 1, r0, c0, c0, 1		/* Load CLID register */
-	ands    r3, r0, #0x7000000		/* Get LoC */
-	mov    r3, r3, lsr #23
-	beq    done				/* if LoC is 0, then no need to clean */
-	mov    r10, #0				/* start cleaning at cache level 0 */
-loop1:	add    r2, r10, r10, lsr #1		/* work out 3x current cache level */
-	mov    r1, r0, lsr r2			/* get cache type */
-	and    r1, r1, #7			/* mask of the bits for current cache only*/
-	cmp    r1, #2				/* cache at this level */
-	blt    skip				/* skip if no cache, or just i-cache */
-	mcr    p15, 2, r10, c0, c0, 0		/* select current cache level */
-	isb					/* isb to sych the new CSSR & CSIDR */
-	mrc    p15, 1, r1, c0, c0, 0		/* read the new CSIDR */
-	and    r2, r1, #7			/* extract the length of the cache lines */
-	add    r2, r2, #4
-	ldr    r4, =0x3ff
-	ands   r4, r4, r1, lsr #3		/* Max on the way size */
-	clz    r5, r4				/* find bit position of way size increment */
-	ldr    r7, =0x7fff
-	ands    r7, r7, r1, lsr #13		/* Max number of the index size */
-loop2:	mov     r9, r4
-loop3:	orr     r11, r10, r9, lsl r5		/* factor way and cache number */
-	orr    r11, r11, r7, lsl r2		/* factor index number */
-	mcr    p15, 0, r11, c7, c14, 2		/* clean & invalidate by set/way */
-	subs    r9, r9, #1			/* decrement the way */
-	bge     loop3
-	subs    r7, r7, #1			/* decrement the index */
-	bge     loop2
-skip:	add     r10, r10, #2			/*  increment cache number */
-	cmp     r3, r10
-	bgt     loop1
-done:	isb
-	pop    {r4-r11}
-	RET
-
 ENTRY(armv7_idcache_wbinv_all)
 	stmdb	sp!, {lr}
 	bl armv7_dcache_wbinv_all
