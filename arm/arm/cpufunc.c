@@ -1090,7 +1090,7 @@ get_cachetype_cp15()
 		__asm __volatile("mrc p15, 1, %0, c0, c0, 1"
 		    : "=r" (clevel));
 		arm_cache_level = clevel;
-		arm_cache_loc = CPU_CLIDR_LOC(arm_cache_level) << 1;
+		arm_cache_loc = CPU_CLIDR_LOC(arm_cache_level);
 		i = 0;
 		while ((type = (clevel & 0x7)) && i < 7) {
 			EPRINTF("cache type=%u i=%u\n",type,i);

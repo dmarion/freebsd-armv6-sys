@@ -49,12 +49,8 @@ ENTRY(armv7_setttb)
 	stmdb   sp!, {r0, lr}
  	bl      _C_LABEL(armv7_idcache_wbinv_all) /* clean the D cache */
  	ldmia   sp!, {r0, lr}
-// 	mcr     p15, 0, r0, c8, c7, 0   /* invalidate I+D TLBs */
-// 	dsb
-//	isb
  	mcr	p15, 0, r0, c2, c0, 0	/* Translation Table Base Register 0 (TTBR0) */
- 	dsb
- 	isb
+ 	mcr     p15, 0, r0, c8, c7, 0   /* invalidate I+D TLBs */
 	RET
 
 ENTRY(armv7_tlb_flushID)
@@ -87,6 +83,7 @@ ENTRY(armv7_dcache_wbinv_all)
 Loop1:
 	/* Get cache type for given level */
 	mov	r2, r8, lsl #2
+	add	r2, r2, r2
 	ldr	r0, .Lcache_type
 	ldr	r1, [r0, r2]
 
@@ -165,7 +162,7 @@ done:	isb
 
 ENTRY(armv7_idcache_wbinv_all)
 	stmdb	sp!, {lr}
-	bl armv7_dcache_wbinv_all2
+	bl armv7_dcache_wbinv_all
 	mcr	p15, 0, r0, c7, c5, 0	/* Invalidate all I caches to PoU (ICIALLU) */
 	dsb
 	isb
