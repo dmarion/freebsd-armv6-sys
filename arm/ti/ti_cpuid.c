@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/ti/omap4/omap44xx_reg.h>
 #include <arm/ti/omap3/omap35xx_reg.h>
+#include <arm/ti/am335x/am335x_reg.h>
 
 #define OMAP4_STD_FUSE_DIE_ID_0    0x2200
 #define OMAP4_ID_CODE              0x2204
@@ -61,8 +62,6 @@ __FBSDID("$FreeBSD$");
 #define OMAP4_STD_FUSE_PROD_ID_1   0x2218
 
 #define OMAP3_ID_CODE              0xA204
-
-#define REG_READ32(r)              *((volatile uint32_t*)(r))
 
 static uint32_t chip_revision = 0xffffffff;
 
@@ -215,6 +214,45 @@ omap3_get_revision(void)
 		OMAP_REV_MINOR(chip_revision));
 }
 
+static void
+am335x_get_revision(void)
+{
+	uint32_t dev_feature;
+	uint8_t cpu_last_char;
+	bus_space_handle_t bsh;
+
+	bus_space_map(fdtbus_bs_tag, AM335X_CONTROL_BASE, AM335X_CONTROL_SIZE, 0, &bsh);
+	chip_revision = bus_space_read_4(fdtbus_bs_tag, bsh, AM335X_CONTROL_DEVICE_ID);
+	dev_feature = bus_space_read_4(fdtbus_bs_tag, bsh, AM335X_CONTROL_DEV_FEATURE);
+	bus_space_unmap(fdtbus_bs_tag, bsh, AM335X_CONTROL_SIZE);
+
+	switch (dev_feature) {
+		case 0x00FF0382:
+			cpu_last_char='2';
+			break;
+		case 0x20FF0382:
+			cpu_last_char='4';
+			break;
+		case 0x00FF0383:
+			cpu_last_char='6';
+			break;
+		case 0x00FE0383:
+			cpu_last_char='7';
+			break;
+		case 0x20FF0383:
+			cpu_last_char='8';
+			break;
+		case 0x20FE0383:
+			cpu_last_char='9';
+			break;
+		default:
+			cpu_last_char='x';
+	}
+
+	printf("Texas Instruments AM335%c Processor, Revision ES1.%u\n",
+		cpu_last_char, AM335X_DEVREV(chip_revision));
+}
+
 /**
  *	ti_cpu_ident - attempts to identify the chip we are running on
  *	@dummy: ignored
@@ -235,6 +273,9 @@ ti_cpu_ident(void *dummy)
 		break;
 	case CHIP_OMAP_4:
 		omap4_get_revision();
+		break;
+	case CHIP_AM335X:
+		am335x_get_revision();
 		break;
 	default:
 		panic("Unknown chip type, fixme!\n");

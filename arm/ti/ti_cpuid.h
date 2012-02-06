@@ -49,6 +49,8 @@
 #define OMAP4430_REV_ES2_2      OMAP_MAKEREV(0x4430, 2, 2, 0)
 #define OMAP4430_REV_ES2_3      OMAP_MAKEREV(0x4430, 2, 3, 0)
 
+#define AM335X_DEVREV(x)	((x) >> 28)
+
 #define CHIP_OMAP_3	0
 #define CHIP_OMAP_4	1
 #define CHIP_AM335X	2
