@@ -612,7 +612,7 @@ platform_devmap_init(void)
 	fdt_devmap[i].pd_pa = 0x44C00000;       /* L4_WKUP */
 	fdt_devmap[i].pd_size = 0x400000;       /* 4 MB */
 	fdt_devmap[i].pd_prot = VM_PROT_READ | VM_PROT_WRITE;
-	fdt_devmap[i].pd_cache = PTE_NOCACHE;
+	fdt_devmap[i].pd_cache = 2; //PTE_NOCACHE;
 	i++;
 #else
 #error "Unknown SoC"
