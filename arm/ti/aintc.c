@@ -49,7 +49,19 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#define INTC_REVISION		0x00
+#define INTC_SYSCONFIG		0x10
+#define INTC_SYSSTATUS		0x14
+#define INTC_SIR_IRQ		0x40
+#define INTC_CONTROL		0x48
+#define INTC_THRESHOLD		0x68
+#define INTC_MIR_CLEAR(x)	(0x88 + ((x) * 0x20))
+#define INTC_MIR_SET(x)		(0x8C + ((x) * 0x20))
+#define INTC_ISR_SET(x)		(0x90 + ((x) * 0x20))
+#define INTC_ISR_CLEAR(x)	(0x94 + ((x) * 0x20))
+
 struct ti_aintc_softc {
+	device_t		sc_dev;
 	struct resource *	aintc_res[3];
 	bus_space_tag_t		aintc_bst;
 	bus_space_handle_t	aintc_bsh;
@@ -83,6 +95,9 @@ static int
 ti_aintc_attach(device_t dev)
 {
 	struct		ti_aintc_softc *sc = device_get_softc(dev);
+	uint32_t x;
+
+	sc->sc_dev = dev;
 
 	if (ti_aintc_sc)
 		return (ENXIO);
@@ -94,6 +109,11 @@ ti_aintc_attach(device_t dev)
 
 	sc->aintc_bst = rman_get_bustag(sc->aintc_res[0]);
 	sc->aintc_bsh = rman_get_bushandle(sc->aintc_res[0]);
+
+	ti_aintc_sc = sc;
+
+	x = aintc_read_4(INTC_REVISION);
+	device_printf(dev, "Revision %u.%u\n",(x >> 4) & 0xF, x & 0xF);
 	return (0);
 }
 
@@ -104,7 +124,7 @@ static device_method_t ti_aintc_methods[] = {
 };
 
 static driver_t ti_aintc_driver = {
-	"gic",
+	"aintc",
 	ti_aintc_methods,
 	sizeof(struct ti_aintc_softc),
 };
@@ -116,15 +136,38 @@ DRIVER_MODULE(aintc, simplebus, ti_aintc_driver, ti_aintc_devclass, 0, 0);
 int
 arm_get_next_irq(int last_irq)
 {
-	return 0;
+	uint32_t active_irq;
+
+	if (last_irq != -1) {
+		aintc_write_4(INTC_ISR_CLEAR(last_irq >> 5),
+			1UL << (last_irq & 0x1F));
+		aintc_write_4(INTC_CONTROL,1);
+	}
+
+	/* Get the next active interrupt */
+	active_irq = aintc_read_4(INTC_SIR_IRQ);
+
+	/* Check for spurious interrupt */
+	if ((active_irq & 0xffffff80)) {
+		device_printf(ti_aintc_sc->sc_dev,
+			"Spurious interrupt detected (0x%08x)\n", active_irq);
+		return -1;
+	}
+
+	if (active_irq != last_irq)
+		return active_irq;
+	else
+		return -1;
 }
 
 void
 arm_mask_irq(uintptr_t nb)
 {
+	aintc_write_4(INTC_MIR_SET(nb >> 5), (1UL << (nb & 0x1F)));
 }
 
 void
 arm_unmask_irq(uintptr_t nb)
 {
+	aintc_write_4(INTC_MIR_CLEAR(nb >> 5), (1UL << (nb & 0x1F)));
 }
