@@ -86,7 +86,11 @@ __FBSDID("$FreeBSD$");
 #define CPSW_CPDMA_TX_INTMASK_SET	(CPSW_CPDMA_OFFSET + 0x88)
 #define CPSW_CPDMA_CPDMA_EOI_VECTOR	(CPSW_CPDMA_OFFSET + 0x94)
 #define CPSW_CPDMA_RX_INTMASK_SET	(CPSW_CPDMA_OFFSET + 0xa8)
-#define CPSW_CPDMA_RX_FREEBUFFER(p)	(CPSW_CPDMA_OFFSET + 0xe0 + (p * 0x04))
+#define CPSW_CPDMA_RX_FREEBUFFER(p)	(CPSW_CPDMA_OFFSET + 0x0e0 + (p * 0x04))
+#define CPSW_CPDMA_TX_HDP(p)		(CPSW_CPDMA_OFFSET + 0x200 + (p * 0x04))
+#define CPSW_CPDMA_RX_HDP(p)		(CPSW_CPDMA_OFFSET + 0x220 + (p * 0x04))
+#define CPSW_CPDMA_TX_CP(p)		(CPSW_CPDMA_OFFSET + 0x240 + (p * 0x04))
+#define CPSW_CPDMA_RX_CP(p)		(CPSW_CPDMA_OFFSET + 0x260 + (p * 0x04))
 
 #define CPSW_CPTS_OFFSET		0x0C00
 
@@ -113,6 +117,12 @@ __FBSDID("$FreeBSD$");
 #define CPSW_WR_C_RX_EN(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x14)
 #define CPSW_WR_C_TX_EN(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x18)
 #define CPSW_WR_C_MISC_EN(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x1C)
+#define CPSW_WR_C_RX_THRESH_STAT(p)	(CPSW_WR_OFFSET + (0x10 * p) + 0x40)
+#define CPSW_WR_C_RX_STAT(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x44)
+#define CPSW_WR_C_TX_STAT(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x48)
+#define CPSW_WR_C_MISC_STAT(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x4C)
+
+#define CPSW_CPPI_RAM_OFFSET		0x2000
 
 #define CPSW_INTR_COUNT		4
 #define CPSW_TX_DESC_NUM	256
@@ -133,9 +143,25 @@ struct cpsw_softc {
 	void		*ih_cookie[CPSW_INTR_COUNT];	/* interrupt handlers cookies */
 	struct callout	wd_callout;
 	uint32_t	cpsw_if_flags;
+
+	bus_dma_tag_t	buffer_tag;
+	bus_dmamap_t	buffer_map;
+	void *		buffer_vaddr;
+	bus_addr_t	buffer_paddr;
+	char		buffer[2048];
 };
 
-static struct cpsw_softc *sc_cpsw0 = NULL;
+struct cpsw_cpdma_bd {
+  volatile struct cpsw_cpdma_bd *next;
+  volatile uint32_t bufptr;
+  volatile uint16_t buflen;
+  volatile uint16_t bufoff;
+  volatile uint16_t pktlen;
+  volatile uint16_t flags;
+};
+
+
+static struct cpsw_softc *cpsw_sc = NULL;
 
 static int cpsw_probe(device_t dev);
 static int cpsw_attach(device_t dev);
@@ -215,6 +241,17 @@ static struct {
 #define cpsw_write_4(reg, val)		\
 	bus_write_4(sc->res[0], reg, val)
 
+#define cpsw_cpdma_read_bd(i, val)	\
+	bus_read_region_4(sc->res[0], CPSW_CPPI_RAM_OFFSET + (i*16), val, 16)
+#define cpsw_cpdma_write_bd(i, val)	\
+	bus_write_region_4(sc->res[0], CPSW_CPPI_RAM_OFFSET + (i*16), val, 16)
+
+#define DUMP_BD(p) cpsw_cpdma_read_bd(p, &bd);					\
+	printf("%s: BD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "		\
+	"buflen=0x%04x pktlen=0x%04x flags=0x%04x\n", __func__, p,	\
+	bd.next, bd.bufptr, bd.bufoff,bd.buflen, bd.pktlen, bd.flags)
+
+
 /* Locking macros */
 #define CPSW_TRANSMIT_LOCK(sc) do {					\
 		mtx_assert(&(sc)->receive_lock, MA_NOTOWNED);		\
@@ -278,7 +315,7 @@ cpsw_attach(device_t dev)
 	sc->node = ofw_bus_get_node(dev);
 
 	if (device_get_unit(dev) == 0)
-		sc_cpsw0 = sc;
+		cpsw_sc = sc;
 
 	/* Get phy address from fdt */
 	if (fdt_get_phyaddr(sc->node, &phy) != 0) {
@@ -390,7 +427,7 @@ cpsw_attach(device_t dev)
 	for (i = 1; i <= CPSW_INTR_COUNT; ++i) {
 		error = bus_setup_intr(dev, sc->res[i],
 		    INTR_TYPE_NET | INTR_MPSAFE,
-		    NULL, *cpsw_intrs[i].handler,
+		    NULL, *cpsw_intrs[i - 1].handler,
 		    sc, &sc->ih_cookie[i - 1]);
 		if (error) {
 			device_printf(dev, "could not setup %s\n",
@@ -470,7 +507,7 @@ cpsw_resume(device_t dev)
 static int
 cpsw_shutdown(device_t dev)
 {
-	struct cpsw_softc *sc = device_get_softc(dev);
+	//struct cpsw_softc *sc = device_get_softc(dev);
 	printf("%s: unimplemented\n",__func__);
 	return (0);
 }
@@ -547,7 +584,7 @@ cpsw_miibus_writereg(device_t dev, int phy, int reg, int value)
 static void
 cpsw_start(struct ifnet *ifp)
 {
-	struct cpsw_softc *sc = ifp->if_softc;
+	//struct cpsw_softc *sc = ifp->if_softc;
 	printf("%s: unimplemented\n",__func__);
 #if 0
 	MGE_TRANSMIT_LOCK(sc);
@@ -625,8 +662,8 @@ cpsw_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 static void
 cpsw_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 {
-	struct cpsw_softc *sc = ifp->if_softc;
-	struct mii_data *mii;
+	//struct cpsw_softc *sc = ifp->if_softc;
+	//struct mii_data *mii;
 
 	printf("%s: unimplemented\n",__func__);
 #if 0
@@ -646,7 +683,7 @@ cpsw_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 static int
 cpsw_ifmedia_upd(struct ifnet *ifp)
 {
-	struct cpsw_softc *sc = ifp->if_softc;
+	//struct cpsw_softc *sc = ifp->if_softc;
 
 	printf("%s: unimplemented\n",__func__);
 #if 0
@@ -673,19 +710,28 @@ cpsw_intr_rx_thresh(void *arg)
 static void
 cpsw_intr_rx(void *arg)
 {
+	struct cpsw_softc *sc = arg;
+	struct cpsw_cpdma_bd bd;
+	DUMP_BD(0);
 	printf("%s: unimplemented\n",__func__);
 }
 
 static void
 cpsw_intr_tx(void *arg)
 {
+	struct cpsw_softc *sc = arg;
 	printf("%s: unimplemented\n",__func__);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 }
 
 static void
 cpsw_intr_misc(void *arg)
 {
-	printf("%s: unimplemented\n",__func__);
+	struct cpsw_softc *sc = arg;
+	/* EOI_RX_PULSE */
+	printf("%s: misc_stat=%x\n", __func__,
+		 cpsw_read_4(CPSW_WR_C_MISC_STAT(0)));
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 3);
 }
 
 
@@ -768,9 +814,21 @@ cpsw_init(void *arg)
 }
 
 static void
+cpsw_get_dma_addr(void *arg, bus_dma_segment_t *segs, int nseg, int error)
+{
+	u_int32_t *paddr;
+
+	KASSERT(nseg == 1, ("wrong number of segments, should be 1"));
+	paddr = arg;
+
+	*paddr = segs->ds_addr;
+}
+
+static void
 cpsw_init_locked(void *arg)
 {
 	struct cpsw_softc *sc = arg;
+	struct cpsw_cpdma_bd bd;
 	printf("%s: unimplemented\n",__func__);
 
 	/* Reset SS */
@@ -795,6 +853,51 @@ cpsw_init_locked(void *arg)
         /* Select MII, Internal Delay mode */
 	//HWREG(SOC_CONTROL_REGS + CONTROL_GMII_SEL) = 0x00;
 
+
+	/* Initialize Buffer Descriptors */
+
+	int error;
+	error = bus_dma_tag_create(NULL,	/* parent */
+		1, 0,				/* alignment, boundary */
+		BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
+		BUS_SPACE_MAXADDR,		/* highaddr */
+		NULL, NULL,			/* filtfunc, filtfuncarg */
+		MCLBYTES, 1,			/* maxsize, nsegments */
+		MCLBYTES, 0,			/* maxsegsz, flags */
+		NULL, NULL,			/* lockfunc, lockfuncarg */
+		&sc->buffer_tag);		/* dmat */
+	if (error) {
+		if_printf(sc->ifp, "failed to create busdma tag for mbufs\n");
+	}
+
+	error = bus_dmamem_alloc(sc->buffer_tag, &sc->buffer_vaddr,
+		BUS_DMA_NOWAIT, &sc->buffer_map);
+	if (error) {
+		if_printf(sc->ifp, "bus_dmamem_alloc failed\n");
+	}
+
+	error = bus_dmamap_load(sc->buffer_tag, sc->buffer_map,sc->buffer, 2048,
+		cpsw_get_dma_addr, &(sc->buffer_paddr), BUS_DMA_NOWAIT);
+
+	bus_dmamap_sync(sc->buffer_tag, sc->buffer_map, BUS_DMASYNC_PREREAD);
+
+	if_printf(sc->ifp," vaddr=%x paddr=%x\n", sc->buffer_vaddr, sc->buffer_paddr);
+
+	bd.next = NULL;
+	bd.bufptr= sc->buffer_paddr;
+	bd.bufoff = 0;
+	bd.buflen = 2048;
+	bd.flags = (1<<13);
+	cpsw_cpdma_write_bd(0, &bd);
+
+	DUMP_BD(0);
+//	panic("DONE\n");
+
+
+        volatile uint32_t bufptr;
+        volatile uint32_t bufoff_len;
+        volatile uint32_t flags;
+
 	/* EOI_TX_PULSE */
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 	/* EOI_RX_PULSE */
@@ -814,12 +917,12 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_SL_MACCONTROL(1), (1<<5) | (3<<15));
 
 	/* Write channel 0 RX HDP */
-	// cpsw_write_4(CPSW_CPDMA_RX_HDP(0), 0);  // FIXME active_head
+	 cpsw_write_4(CPSW_CPDMA_RX_HDP(0), 0x4a102000);  // FIXME active_head
 
 	/* Enable interrupts for TX Channel 0 */
-	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
+	//cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
 	/* Enable TX interrupt receive for core 0 */
-	cpsw_write_4(CPSW_WR_C_TX_EN(0), 1);
+	//cpsw_write_4(CPSW_WR_C_TX_EN(0), 1);
 
 	/* Enable interrupts for RX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_SET, 1);

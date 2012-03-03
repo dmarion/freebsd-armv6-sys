@@ -144,6 +144,9 @@ arm_get_next_irq(int last_irq)
 {
 	uint32_t active_irq;
 
+	if ((last_irq>39) && (last_irq<44))
+		printf("IRQ%u\n",last_irq);
+
 	if (last_irq != -1) {
 		aintc_write_4(INTC_ISR_CLEAR(last_irq >> 5),
 			1UL << (last_irq & 0x1F));
