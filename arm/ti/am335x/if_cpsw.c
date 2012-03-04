@@ -83,6 +83,7 @@ __FBSDID("$FreeBSD$");
 #define CPSW_CPDMA_OFFSET		0x0800
 #define CPSW_CPDMA_TX_CONTROL		(CPSW_CPDMA_OFFSET + 0x04)
 #define CPSW_CPDMA_RX_CONTROL		(CPSW_CPDMA_OFFSET + 0x14)
+#define CPSW_CPDMA_SOFT_RESET		(CPSW_CPDMA_OFFSET + 0x1c)
 #define CPSW_CPDMA_TX_INTMASK_SET	(CPSW_CPDMA_OFFSET + 0x88)
 #define CPSW_CPDMA_CPDMA_EOI_VECTOR	(CPSW_CPDMA_OFFSET + 0x94)
 #define CPSW_CPDMA_RX_INTMASK_SET	(CPSW_CPDMA_OFFSET + 0xa8)
@@ -141,8 +142,12 @@ struct cpsw_softc {
 	struct mtx	receive_lock;			/* receiver lock */
 	struct resource	*res[1 + CPSW_INTR_COUNT];	/* resources */
 	void		*ih_cookie[CPSW_INTR_COUNT];	/* interrupt handlers cookies */
-	struct callout	wd_callout;
+
 	uint32_t	cpsw_if_flags;
+	uint32_t	cpsw_media_status;
+
+	struct callout	wd_callout;
+	int		wd_timer;
 
 	bus_dma_tag_t	buffer_tag;
 	bus_dmamap_t	buffer_map;
@@ -520,7 +525,7 @@ cpsw_miibus_readreg(device_t dev, int phy, int reg)
 	uint32_t retries = CPSW_MIIBUS_RETRIES;
 
 	sc = device_get_softc(dev);
-	printf("%s: phy=0x%x reg=0x%x ",__func__,phy,reg);
+	//printf("%s: phy=0x%x reg=0x%x ",__func__,phy,reg);
 
 	/* Wait until interface is ready by watching GO bit */
 	while(--retries && (cpsw_read_4(MDIOUSERACCESS0) & (1 << 31)) )
@@ -540,7 +545,7 @@ cpsw_miibus_readreg(device_t dev, int phy, int reg)
 	r = cpsw_read_4(MDIOUSERACCESS0);
 	/* Check for ACK */
 	if(r & (1<<29)) {
-		printf(" ok r=0x%08x\n", r);
+	//	printf(" ok r=0x%08x\n", r);
 		return (r & 0xFFFF);
 	}
 	device_printf(dev, "Failed to read from PHY.\n");
@@ -626,8 +631,10 @@ cpsw_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 					printf("%s: SIOCSIFFLAGS "
 						"IFF_ALLMULTI unimplemented\n",
 						__func__);
-			} else
+			} else {
+				printf("%s: SIOCSIFFLAGS cpsw_init_locked", __func__);
 				cpsw_init_locked(sc);
+			}
 		}
 		else if (ifp->if_drv_flags & IFF_DRV_RUNNING)
 			cpsw_stop(sc);
@@ -683,21 +690,19 @@ cpsw_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 static int
 cpsw_ifmedia_upd(struct ifnet *ifp)
 {
-	//struct cpsw_softc *sc = ifp->if_softc;
+	struct cpsw_softc *sc = ifp->if_softc;
 
-	printf("%s: unimplemented\n",__func__);
-#if 0
+	printf("%s: start\n",__func__);
 	if (ifp->if_flags & IFF_UP) {
-		MGE_GLOBAL_LOCK(sc);
+		CPSW_GLOBAL_LOCK(sc);
 
-		sc->mge_media_status = sc->mii->mii_media.ifm_media;
+		sc->cpsw_media_status = sc->mii->mii_media.ifm_media;
 		mii_mediachg(sc->mii);
-		mge_init_locked(sc);
+		cpsw_init_locked(sc);
 
-		MGE_GLOBAL_UNLOCK(sc);
+		CPSW_GLOBAL_UNLOCK(sc);
 	}
-#endif
-	
+
 	return (0);
 }
 
@@ -721,6 +726,9 @@ cpsw_intr_tx(void *arg)
 {
 	struct cpsw_softc *sc = arg;
 	printf("%s: unimplemented\n",__func__);
+	printf("CPSW_WR_C_TX_STAT(0)=%x\n", cpsw_read_4(CPSW_WR_C_TX_STAT(0)));
+	printf("CPSW_CPDMA_TX_HDP(0)=%x\n", cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
+	printf("CPSW_CPDMA_TX_CP(0)=%x\n", cpsw_read_4(CPSW_CPDMA_TX_CP(0)));
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 }
 
@@ -804,16 +812,6 @@ cpsw_ale_dump_table(struct cpsw_softc *sc) {
 }
 
 static void
-cpsw_init(void *arg)
-{
-	struct cpsw_softc *sc = arg;
-
-	CPSW_GLOBAL_LOCK(sc);
-	cpsw_init_locked(arg);
-	CPSW_GLOBAL_UNLOCK(sc);
-}
-
-static void
 cpsw_get_dma_addr(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 {
 	u_int32_t *paddr;
@@ -825,10 +823,44 @@ cpsw_get_dma_addr(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 }
 
 static void
+cpsw_tick(void *msc)
+{
+	struct cpsw_softc *sc = msc;
+
+	/* Check for TX timeout */
+	//cpsw_watchdog(sc);
+
+	mii_tick(sc->mii);
+
+	/* Check for media type change */
+	if(sc->cpsw_media_status != sc->mii->mii_media.ifm_media) {
+		printf("%s: media type changed (ifm_media=%x)\n",__func__, 
+			sc->mii->mii_media.ifm_media);
+		cpsw_ifmedia_upd(sc->ifp);
+	}
+
+	/* Schedule another timeout one second from now */
+	callout_reset(&sc->wd_callout, hz, cpsw_tick, sc);
+}
+
+
+static void
+cpsw_init(void *arg)
+{
+	struct cpsw_softc *sc = arg;
+	printf("%s: unimplemented\n",__func__);
+	CPSW_GLOBAL_LOCK(sc);
+	cpsw_init_locked(arg);
+	CPSW_GLOBAL_UNLOCK(sc);
+}
+
+static void
 cpsw_init_locked(void *arg)
 {
 	struct cpsw_softc *sc = arg;
 	struct cpsw_cpdma_bd bd;
+	int i;
+
 	printf("%s: unimplemented\n",__func__);
 
 	/* Reset SS */
@@ -839,13 +871,24 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
 	while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
 
+	/* Reset DMA */
+	cpsw_write_4(CPSW_CPDMA_SOFT_RESET, 1);
+	while(cpsw_read_4(CPSW_CPDMA_SOFT_RESET) & 1);
+        for(i = 0; i < 8; i++) {
+		cpsw_write_4(CPSW_CPDMA_TX_HDP(i), 0);
+		cpsw_write_4(CPSW_CPDMA_RX_HDP(i), 0);
+		cpsw_write_4(CPSW_CPDMA_TX_CP(i), 0);
+		cpsw_write_4(CPSW_CPDMA_RX_CP(i), 0);
+        }
+
+
 	/* Reset Sliver port 0 and 1 */
 	cpsw_write_4(CPSW_SL_SOFT_RESET(0), 1);
 	while(cpsw_read_4(CPSW_SL_SOFT_RESET(0)) & 1);
 	cpsw_write_4(CPSW_SL_SOFT_RESET(1), 1);
 	while(cpsw_read_4(CPSW_SL_SOFT_RESET(1)) & 1);
 
-	cpsw_ale_dump_table(sc);
+	//cpsw_ale_dump_table(sc);
 
 	/* Enable statistics for ports 0, 1 and 2 */
 	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
@@ -906,7 +949,7 @@ cpsw_init_locked(void *arg)
 	/* Set number of free rx buffers to 0 */
 	cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 0);
 
-	/* Enable TX */
+	/* Enable TX DMA */
 	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
 
 	/* Enable RX DMA  */
@@ -920,17 +963,23 @@ cpsw_init_locked(void *arg)
 	 cpsw_write_4(CPSW_CPDMA_RX_HDP(0), 0x4a102000);  // FIXME active_head
 
 	/* Enable interrupts for TX Channel 0 */
-	//cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
+	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
 	/* Enable TX interrupt receive for core 0 */
-	//cpsw_write_4(CPSW_WR_C_TX_EN(0), 1);
+	cpsw_write_4(CPSW_WR_C_TX_EN(0), 1);
 
 	/* Enable interrupts for RX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_SET, 1);
 	/* Enable RX interrupt receive for core 0 */
 	cpsw_write_4(CPSW_WR_C_RX_EN(0), 1);
 
+	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
+	/* TODO Calculate MDCLK=CLK/(CLKDIV+1) */
+	cpsw_write_4(MDIOCONTROL, (1<<30) | (1<<18) | 0xFF);
+
 	/* Activate network interface */
 	sc->ifp->if_drv_flags |= IFF_DRV_RUNNING;
 	sc->ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+	sc->wd_timer = 0;
 
+	callout_reset(&sc->wd_callout, hz, cpsw_tick, sc);
 }
