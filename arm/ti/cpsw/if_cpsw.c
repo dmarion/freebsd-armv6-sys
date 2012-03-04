@@ -69,102 +69,10 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-//#include <dev/cpsw/if_cpswvar.h>
+#include <arm/ti/cpsw/if_cpswreg.h>
+#include <arm/ti/cpsw/if_cpswvar.h>
 
 #include "miibus_if.h"
-
-#define CPSW_SS_OFFSET			0x0000
-#define CPSW_SS_IDVER			(CPSW_SS_OFFSET + 0x00)
-#define CPSW_SS_SOFT_RESET		(CPSW_SS_OFFSET + 0x08)
-#define CPSW_SS_STAT_PORT_EN		(CPSW_SS_OFFSET + 0x0C)
-
-#define CPSW_PORT_OFFSET		0x0100
-
-#define CPSW_CPDMA_OFFSET		0x0800
-#define CPSW_CPDMA_TX_CONTROL		(CPSW_CPDMA_OFFSET + 0x04)
-#define CPSW_CPDMA_RX_CONTROL		(CPSW_CPDMA_OFFSET + 0x14)
-#define CPSW_CPDMA_SOFT_RESET		(CPSW_CPDMA_OFFSET + 0x1c)
-#define CPSW_CPDMA_TX_INTMASK_SET	(CPSW_CPDMA_OFFSET + 0x88)
-#define CPSW_CPDMA_CPDMA_EOI_VECTOR	(CPSW_CPDMA_OFFSET + 0x94)
-#define CPSW_CPDMA_RX_INTMASK_SET	(CPSW_CPDMA_OFFSET + 0xa8)
-#define CPSW_CPDMA_RX_FREEBUFFER(p)	(CPSW_CPDMA_OFFSET + 0x0e0 + (p * 0x04))
-#define CPSW_CPDMA_TX_HDP(p)		(CPSW_CPDMA_OFFSET + 0x200 + (p * 0x04))
-#define CPSW_CPDMA_RX_HDP(p)		(CPSW_CPDMA_OFFSET + 0x220 + (p * 0x04))
-#define CPSW_CPDMA_TX_CP(p)		(CPSW_CPDMA_OFFSET + 0x240 + (p * 0x04))
-#define CPSW_CPDMA_RX_CP(p)		(CPSW_CPDMA_OFFSET + 0x260 + (p * 0x04))
-
-#define CPSW_CPTS_OFFSET		0x0C00
-
-#define CPSW_ALE_OFFSET			0x0D00
-#define CPSW_ALE_CONTROL		(CPSW_ALE_OFFSET + 0x08)
-#define CPSW_ALE_PORTCTL(p)		(CPSW_ALE_OFFSET + 0x40 + (p * 0x04))
-#define CPSW_ALE_TBLCTL			(CPSW_ALE_OFFSET + 0x20)
-#define CPSW_ALE_TBLW2			(CPSW_ALE_OFFSET + 0x34)
-#define CPSW_ALE_TBLW1			(CPSW_ALE_OFFSET + 0x38)
-#define CPSW_ALE_TBLW0			(CPSW_ALE_OFFSET + 0x3C)
-
-#define CPSW_SL_OFFSET			0x0D80
-#define CPSW_SL_MACCONTROL(p)		(CPSW_SL_OFFSET + (0x40 * p) + 0x04)
-#define CPSW_SL_SOFT_RESET(p)		(CPSW_SL_OFFSET + (0x40 * p) + 0x0C)
- 
-#define MDIO_OFFSET			0x1000
-#define MDIOCONTROL			(MDIO_OFFSET + 0x04)
-#define MDIOUSERACCESS0			(MDIO_OFFSET + 0x80)
-#define MDIOUSERPHYSEL0			(MDIO_OFFSET + 0x84)
-
-#define CPSW_WR_OFFSET			0x1200
-#define CPSW_WR_SOFT_RESET		(CPSW_WR_OFFSET + 0x04)
-#define CPSW_WR_C_RX_THRESH_EN(p)	(CPSW_WR_OFFSET + (0x10 * p) + 0x10)
-#define CPSW_WR_C_RX_EN(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x14)
-#define CPSW_WR_C_TX_EN(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x18)
-#define CPSW_WR_C_MISC_EN(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x1C)
-#define CPSW_WR_C_RX_THRESH_STAT(p)	(CPSW_WR_OFFSET + (0x10 * p) + 0x40)
-#define CPSW_WR_C_RX_STAT(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x44)
-#define CPSW_WR_C_TX_STAT(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x48)
-#define CPSW_WR_C_MISC_STAT(p)		(CPSW_WR_OFFSET + (0x10 * p) + 0x4C)
-
-#define CPSW_CPPI_RAM_OFFSET		0x2000
-
-#define CPSW_INTR_COUNT		4
-#define CPSW_TX_DESC_NUM	256
-
-/* MII BUS  */
-#define CPSW_MIIBUS_RETRIES	5
-#define CPSW_MIIBUS_DELAY	1000
-
-struct cpsw_softc {
-	struct ifnet	*ifp;
-	phandle_t	node;
-	device_t	dev;
-	device_t	miibus;
-	struct mii_data	*mii;
-	struct mtx	transmit_lock;			/* transmitter lock */
-	struct mtx	receive_lock;			/* receiver lock */
-	struct resource	*res[1 + CPSW_INTR_COUNT];	/* resources */
-	void		*ih_cookie[CPSW_INTR_COUNT];	/* interrupt handlers cookies */
-
-	uint32_t	cpsw_if_flags;
-	uint32_t	cpsw_media_status;
-
-	struct callout	wd_callout;
-	int		wd_timer;
-
-	bus_dma_tag_t	buffer_tag;
-	bus_dmamap_t	buffer_map;
-	void *		buffer_vaddr;
-	bus_addr_t	buffer_paddr;
-	char		buffer[2048];
-};
-
-struct cpsw_cpdma_bd {
-  volatile struct cpsw_cpdma_bd *next;
-  volatile uint32_t bufptr;
-  volatile uint16_t buflen;
-  volatile uint16_t bufoff;
-  volatile uint16_t pktlen;
-  volatile uint16_t flags;
-};
-
 
 static struct cpsw_softc *cpsw_sc = NULL;
 
@@ -184,7 +92,9 @@ static void cpsw_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr);
 static void cpsw_init(void *arg);
 static void cpsw_init_locked(void *arg);
 static void cpsw_start(struct ifnet *ifp);
+static void cpsw_start_locked(struct ifnet *ifp);
 static int cpsw_ioctl(struct ifnet *ifp, u_long command, caddr_t data);
+static int cpsw_allocate_dma(struct cpsw_softc *sc);
 
 static void cpsw_intr_rx_thresh(void *arg);
 static void cpsw_intr_rx(void *arg);
@@ -240,16 +150,6 @@ static struct {
 	{ cpsw_intr_misc,"CPSW misc interrupt" },
 };
 
-/* Read/Write macros */
-#define cpsw_read_4(reg)		\
-	bus_read_4(sc->res[0], reg)
-#define cpsw_write_4(reg, val)		\
-	bus_write_4(sc->res[0], reg, val)
-
-#define cpsw_cpdma_read_bd(i, val)	\
-	bus_read_region_4(sc->res[0], CPSW_CPPI_RAM_OFFSET + (i*16), val, 16)
-#define cpsw_cpdma_write_bd(i, val)	\
-	bus_write_region_4(sc->res[0], CPSW_CPPI_RAM_OFFSET + (i*16), val, 16)
 
 #define DUMP_BD(p) cpsw_cpdma_read_bd(p, &bd);					\
 	printf("%s: BD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "		\
@@ -311,7 +211,7 @@ cpsw_attach(device_t dev)
 	struct cpsw_softc *sc;
 	struct mii_softc *miisc;
 	struct ifnet *ifp;
-	uint8_t hwaddr[ETHER_ADDR_LEN];
+	uint8_t hwaddr[ETHER_ADDR_LEN] = {0xd4,0x94,0xa1,0x38,0xb9,0x13};
 	int i, error, phy;
 	uint32_t reg;
 
@@ -345,15 +245,12 @@ cpsw_attach(device_t dev)
 	device_printf(dev, "Version %d.%d (%d)\n", (reg >> 8 & 0x7),
 		reg & 0xFF, (reg >> 11) & 0x1F);
 
-#if 0
 	/* Allocate DMA, buffers, buffer descriptors */
 	error = cpsw_allocate_dma(sc);
 	if (error) {
 		cpsw_detach(dev);
 		return (ENXIO);
 	}
-#endif
-
 
 #if 0
 	cpsw_add_sysctls(sc);
@@ -390,7 +287,7 @@ cpsw_attach(device_t dev)
 	ifp->if_start = cpsw_start;
 	ifp->if_ioctl = cpsw_ioctl;
 
-	ifp->if_snd.ifq_drv_maxlen = CPSW_TX_DESC_NUM - 1;
+	ifp->if_snd.ifq_drv_maxlen = CPSW_MAX_TX_BUFFERS - 1;
 	IFQ_SET_MAXLEN(&ifp->if_snd, ifp->if_snd.ifq_drv_maxlen);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -586,18 +483,121 @@ cpsw_miibus_writereg(device_t dev, int phy, int reg, int value)
 	return 0;
 }
 
+static int
+cpsw_allocate_dma(struct cpsw_softc *sc)
+{
+	int err;
+	int i;
+
+	/* Allocate a busdma tag and DMA safe memory for TX/RX descriptors. */
+	err = bus_dma_tag_create(
+		bus_get_dma_tag(sc->dev),	/* parent */
+		1, 0,				/* alignment, boundary */
+		BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
+		BUS_SPACE_MAXADDR,		/* highaddr */
+		NULL, NULL,			/* filtfunc, filtfuncarg */
+		MCLBYTES, 1,			/* maxsize, nsegments */
+		MCLBYTES, 0,			/* maxsegsz, flags */
+#if 0
+		busdma_lock_mutex, &sc->sc_mtx,	/* lockfunc, lockfuncarg */
+#endif
+		NULL, NULL,			/* lockfunc, lockfuncarg */
+		&sc->mbuf_dtag);		/* dmatag */
+
+	if (err)
+		return (ENOMEM);
+	for (i = 0; i < CPSW_MAX_TX_BUFFERS; i++) {
+		if ( bus_dmamap_create(sc->mbuf_dtag, 0, &sc->tx_dmamap[i]))
+			return (ENOMEM);
+	}
+
+	return (0);
+}
+
+
+static int
+cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
+{
+	bus_dma_segment_t segs[512];	// FIXME
+	bus_dmamap_t mapp;
+	int error;
+	int seg, nsegs;
+
+	printf("%s: start\n",__func__);
+
+	mapp = sc->tx_dmamap[0];
+
+	/* Create mapping in DMA memory */
+	error = bus_dmamap_load_mbuf_sg(sc->mbuf_dtag, mapp, m0, segs, &nsegs,
+	    BUS_DMA_NOWAIT);
+	printf("%s: 1\n",__func__);
+	if (error != 0 || nsegs != 1 ) {
+		bus_dmamap_unload(sc->mbuf_dtag, mapp);
+		return ((error != 0) ? error : -1);
+	}
+	printf("%s: 2\n",__func__);
+
+	bus_dmamap_sync(sc->mbuf_dtag, mapp, BUS_DMASYNC_PREWRITE);
+	for (seg = 0; seg < nsegs; seg++) {
+		printf("%s: seg=%u ds_len=%u ds_addr=%x\n", __func__,
+			seg, segs[seg].ds_len, segs[seg].ds_addr);
+	}
+	printf("%s: end\n",__func__);
+	return (0);
+}
+
 static void
 cpsw_start(struct ifnet *ifp)
 {
-	//struct cpsw_softc *sc = ifp->if_softc;
-	printf("%s: unimplemented\n",__func__);
-#if 0
-	MGE_TRANSMIT_LOCK(sc);
+	struct cpsw_softc *sc = ifp->if_softc;
+	CPSW_TRANSMIT_LOCK(sc);
 
-	mge_start_locked(ifp);
+	cpsw_start_locked(ifp);
 
-	MGE_TRANSMIT_UNLOCK(sc);
-#endif
+	CPSW_TRANSMIT_UNLOCK(sc);
+}
+
+static void
+cpsw_start_locked(struct ifnet *ifp)
+{
+	struct cpsw_softc *sc = ifp->if_softc;
+	struct mbuf *m0, *mtmp;
+	uint32_t queued = 0;
+
+	printf("%s: start\n",__func__);
+
+	CPSW_TRANSMIT_LOCK_ASSERT(sc);
+
+	if ((ifp->if_drv_flags & (IFF_DRV_RUNNING | IFF_DRV_OACTIVE)) !=
+	    IFF_DRV_RUNNING)
+		return;
+
+	for (;;) {
+		printf("%s: for (;;)\n",__func__);
+		/* Get packet from the queue */
+		IF_DEQUEUE(&ifp->if_snd, m0);
+		if (m0 == NULL)
+			break;
+
+		mtmp = m_defrag(m0, M_DONTWAIT);
+		if (mtmp)
+			m0 = mtmp;
+
+		if (cpsw_encap(sc, m0)) {
+			IF_PREPEND(&ifp->if_snd, m0);
+			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+			break;
+		}
+		queued++;
+		BPF_MTAP(ifp, m0);
+	}
+
+	if (queued) {
+		/* Enable transmitter and watchdog timer */
+		printf("%s: process queued\n",__func__);
+		//sc->wd_timer = 5;
+	}
+	printf("%s: done\n",__func__);
 }
 
 static void
@@ -611,7 +611,7 @@ cpsw_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct cpsw_softc *sc = ifp->if_softc;
 	struct ifreq *ifr = (struct ifreq *)data;
-	int mask, error;
+	int error;
 	uint32_t flags;
 
 	error = 0;
@@ -715,9 +715,7 @@ cpsw_intr_rx_thresh(void *arg)
 static void
 cpsw_intr_rx(void *arg)
 {
-	struct cpsw_softc *sc = arg;
-	struct cpsw_cpdma_bd bd;
-	DUMP_BD(0);
+	//struct cpsw_softc *sc = arg;
 	printf("%s: unimplemented\n",__func__);
 }
 
@@ -742,75 +740,7 @@ cpsw_intr_misc(void *arg)
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 3);
 }
 
-
-static int
-cpsw_ale_read_entry(struct cpsw_softc *sc, uint16_t idx, uint32_t *ale_entry)
-{
-	cpsw_write_4(CPSW_ALE_TBLCTL, idx & 1023);
-	ale_entry[0] = cpsw_read_4(CPSW_ALE_TBLW0);
-	ale_entry[1] = cpsw_read_4(CPSW_ALE_TBLW1);
-	ale_entry[2] = cpsw_read_4(CPSW_ALE_TBLW2);
-}
-
-static int
-cpsw_ale_write_entry(struct cpsw_softc *sc, uint16_t idx, uint32_t *ale_entry)
-{
-	cpsw_write_4(CPSW_ALE_TBLW0, ale_entry[0]);
-	cpsw_write_4(CPSW_ALE_TBLW1, ale_entry[1]);
-	cpsw_write_4(CPSW_ALE_TBLW2, ale_entry[2]);
-	cpsw_write_4(CPSW_ALE_TBLCTL, (idx & 1023) | (1 << 31));
-}
-
-
-static inline void
-cpsw_ale_configure(struct cpsw_softc *sc)
-{
-	uint32_t reg;
-	int i;
-	
-	/* CLEAR_TABLE and ENABLE_ALE */
-	cpsw_write_4(CPSW_ALE_CONTROL, (3<<30));
-
-	/* Set port state to forward for ports 0, 1 and 2 */
-	for(i=0;i<3;i++) {
-		reg = cpsw_read_4(CPSW_ALE_PORTCTL(i));
-		reg |= 0x3;
-		cpsw_write_4(CPSW_ALE_PORTCTL(i), reg);
-	}
-
 #if 0
-	sitaraif_ale_unicastentry_set(sitaraif, 0, (u8_t *)(sitaraif->eth_addr));
-
-	sitaraif_ale_multicastentry_set(sitaraif,
-                                PORT_0_MASK | PORT_1_MASK | PORT_2_MASK,
-                                bcast_addr);
-#endif
-}
-
-static void
-cpsw_ale_dump_table(struct cpsw_softc *sc) {
-	int i;
-	uint32_t ale_entry[3];
-	for(i=0; i< 1024; i++) {
-		cpsw_ale_read_entry(sc, i, ale_entry);
-		if (ale_entry[0] || ale_entry[1] || ale_entry[2]) {
-			printf("ALE[%4u] %08x %08x %08x ", i, ale_entry[0], 
-				ale_entry[1],ale_entry[2]);
-			printf("mac: %02x:%02x:%02x:%02x:%02x:%02x ", 
-				(ale_entry[1] >> 8) & 0xFF,
-				(ale_entry[1] >> 0) & 0xFF,
-				(ale_entry[0] >>24) & 0xFF,
-				(ale_entry[0] >>16) & 0xFF,
-				(ale_entry[0] >> 8) & 0xFF,
-				(ale_entry[0] >> 0) & 0xFF);
-			printf( ((ale_entry[1]>>8)&1) ? "mcast " : "ucast ");
-			printf("type: %u ", (ale_entry[1]>>28)&3);
-			printf("port: %u ", (ale_entry[2]>>2)&7);
-			printf("\n");
-		}
-	}
-}
-
 static void
 cpsw_get_dma_addr(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 {
@@ -821,6 +751,7 @@ cpsw_get_dma_addr(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 
 	*paddr = segs->ds_addr;
 }
+#endif
 
 static void
 cpsw_tick(void *msc)
@@ -858,7 +789,6 @@ static void
 cpsw_init_locked(void *arg)
 {
 	struct cpsw_softc *sc = arg;
-	struct cpsw_cpdma_bd bd;
 	int i;
 
 	printf("%s: unimplemented\n",__func__);
@@ -898,7 +828,7 @@ cpsw_init_locked(void *arg)
 
 
 	/* Initialize Buffer Descriptors */
-
+#if 0
 	int error;
 	error = bus_dma_tag_create(NULL,	/* parent */
 		1, 0,				/* alignment, boundary */
@@ -935,12 +865,7 @@ cpsw_init_locked(void *arg)
 
 	DUMP_BD(0);
 //	panic("DONE\n");
-
-
-        volatile uint32_t bufptr;
-        volatile uint32_t bufoff_len;
-        volatile uint32_t flags;
-
+#endif
 	/* EOI_TX_PULSE */
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 	/* EOI_RX_PULSE */
