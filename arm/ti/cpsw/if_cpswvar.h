@@ -41,8 +41,8 @@ struct cpsw_softc {
 	device_t	dev;
 	device_t	miibus;
 	struct mii_data	*mii;
-	struct mtx	transmit_lock;			/* transmitter lock */
-	struct mtx	receive_lock;			/* receiver lock */
+	struct mtx	tx_lock;			/* transmitter lock */
+	struct mtx	rx_lock;			/* receiver lock */
 	struct resource	*res[1 + CPSW_INTR_COUNT];	/* resources */
 	void		*ih_cookie[CPSW_INTR_COUNT];	/* interrupt handlers cookies */
 

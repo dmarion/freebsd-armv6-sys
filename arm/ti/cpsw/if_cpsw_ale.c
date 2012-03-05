@@ -72,6 +72,7 @@ __FBSDID("$FreeBSD$");
 #include <arm/ti/cpsw/if_cpswreg.h>
 #include <arm/ti/cpsw/if_cpswvar.h>
 
+
 static int
 cpsw_ale_read_entry(struct cpsw_softc *sc, uint16_t idx, uint32_t *ale_entry)
 {
@@ -107,11 +108,8 @@ cpsw_ale_configure(struct cpsw_softc *sc)
 	}
 
 #if 0
-	sitaraif_ale_unicastentry_set(sitaraif, 0, (u8_t *)(sitaraif->eth_addr));
-
-	sitaraif_ale_multicastentry_set(sitaraif,
-                                PORT_0_MASK | PORT_1_MASK | PORT_2_MASK,
-                                bcast_addr);
+	cpsw_ale_uc_entry_set(sc, 0,eth_addr);
+	cpsw_ale_mc_entry_set(sc, PORT_0_MASK|PORT_1_MASK|PORT_2_MASK, bcast_addr);
 #endif
 }
 

@@ -158,39 +158,39 @@ static struct {
 
 
 /* Locking macros */
-#define CPSW_TRANSMIT_LOCK(sc) do {					\
-		mtx_assert(&(sc)->receive_lock, MA_NOTOWNED);		\
-		mtx_lock(&(sc)->transmit_lock);				\
+#define CPSW_TX_LOCK(sc) do {					\
+		mtx_assert(&(sc)->rx_lock, MA_NOTOWNED);		\
+		mtx_lock(&(sc)->tx_lock);				\
 } while (0)
 
-#define CPSW_TRANSMIT_UNLOCK(sc)	mtx_unlock(&(sc)->transmit_lock)
-#define CPSW_TRANSMIT_LOCK_ASSERT(sc)	mtx_assert(&(sc)->transmit_lock, MA_OWNED)
+#define CPSW_TX_UNLOCK(sc)	mtx_unlock(&(sc)->tx_lock)
+#define CPSW_TX_LOCK_ASSERT(sc)	mtx_assert(&(sc)->tx_lock, MA_OWNED)
 
-#define CPSW_RECEIVE_LOCK(sc) do {					\
-		mtx_assert(&(sc)->transmit_lock, MA_NOTOWNED);		\
-		mtx_lock(&(sc)->receive_lock);				\
+#define CPSW_RX_LOCK(sc) do {					\
+		mtx_assert(&(sc)->tx_lock, MA_NOTOWNED);		\
+		mtx_lock(&(sc)->rx_lock);				\
 } while (0)
 
-#define CPSW_RECEIVE_UNLOCK(sc)		mtx_unlock(&(sc)->receive_lock)
-#define CPSW_RECEIVE_LOCK_ASSERT(sc)	mtx_assert(&(sc)->receive_lock, MA_OWNED)
+#define CPSW_RX_UNLOCK(sc)		mtx_unlock(&(sc)->rx_lock)
+#define CPSW_RX_LOCK_ASSERT(sc)	mtx_assert(&(sc)->rx_lock, MA_OWNED)
 
 #define CPSW_GLOBAL_LOCK(sc) do {					\
-		if ((mtx_owned(&(sc)->transmit_lock) ? 1 : 0) !=	\
-		    (mtx_owned(&(sc)->receive_lock) ? 1 : 0)) {		\
+		if ((mtx_owned(&(sc)->tx_lock) ? 1 : 0) !=	\
+		    (mtx_owned(&(sc)->rx_lock) ? 1 : 0)) {		\
 			panic("mge deadlock possibility detection!");	\
 		}							\
-		mtx_lock(&(sc)->transmit_lock);				\
-		mtx_lock(&(sc)->receive_lock);				\
+		mtx_lock(&(sc)->tx_lock);				\
+		mtx_lock(&(sc)->rx_lock);				\
 } while (0)
 
 #define CPSW_GLOBAL_UNLOCK(sc) do {					\
-		CPSW_RECEIVE_UNLOCK(sc);				\
-		CPSW_TRANSMIT_UNLOCK(sc);				\
+		CPSW_RX_UNLOCK(sc);				\
+		CPSW_TX_UNLOCK(sc);				\
 } while (0)
 
 #define CPSW_GLOBAL_LOCK_ASSERT(sc) do {				\
-		CPSW_TRANSMIT_LOCK_ASSERT(sc);				\
-		CPSW_RECEIVE_LOCK_ASSERT(sc);				\
+		CPSW_TX_LOCK_ASSERT(sc);				\
+		CPSW_RX_LOCK_ASSERT(sc);				\
 } while (0)
 
 
@@ -228,9 +228,9 @@ cpsw_attach(device_t dev)
 		return (ENXIO);
 	}
 	/* Initialize mutexes */
-	mtx_init(&sc->transmit_lock, device_get_nameunit(dev),
+	mtx_init(&sc->tx_lock, device_get_nameunit(dev),
 		"cpsw TX lock", MTX_DEF);
-	mtx_init(&sc->receive_lock, device_get_nameunit(dev),
+	mtx_init(&sc->rx_lock, device_get_nameunit(dev),
 		"cpsw RX lock", MTX_DEF);
 
 	/* Allocate IO and IRQ resources */
@@ -384,8 +384,8 @@ cpsw_detach(device_t dev)
 	bus_release_resources(dev, res_spec, sc->res);
 
 	/* Destroy mutexes */
-	mtx_destroy(&sc->receive_lock);
-	mtx_destroy(&sc->transmit_lock);
+	mtx_destroy(&sc->rx_lock);
+	mtx_destroy(&sc->tx_lock);
 
 	return (0);
 }
@@ -530,18 +530,18 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 	/* Create mapping in DMA memory */
 	error = bus_dmamap_load_mbuf_sg(sc->mbuf_dtag, mapp, m0, segs, &nsegs,
 	    BUS_DMA_NOWAIT);
-	printf("%s: 1\n",__func__);
+
 	if (error != 0 || nsegs != 1 ) {
 		bus_dmamap_unload(sc->mbuf_dtag, mapp);
 		return ((error != 0) ? error : -1);
 	}
-	printf("%s: 2\n",__func__);
 
 	bus_dmamap_sync(sc->mbuf_dtag, mapp, BUS_DMASYNC_PREWRITE);
 	for (seg = 0; seg < nsegs; seg++) {
-		printf("%s: seg=%u ds_len=%u ds_addr=%x\n", __func__,
-			seg, segs[seg].ds_len, segs[seg].ds_addr);
+		printf("%s: seg=%u mapp=%x ds_len=%u ds_addr=%x\n", __func__,
+			seg, mapp, segs[seg].ds_len, segs[seg].ds_addr);
 	}
+
 	printf("%s: end\n",__func__);
 	return (0);
 }
@@ -550,11 +550,11 @@ static void
 cpsw_start(struct ifnet *ifp)
 {
 	struct cpsw_softc *sc = ifp->if_softc;
-	CPSW_TRANSMIT_LOCK(sc);
+	CPSW_TX_LOCK(sc);
 
 	cpsw_start_locked(ifp);
 
-	CPSW_TRANSMIT_UNLOCK(sc);
+	CPSW_TX_UNLOCK(sc);
 }
 
 static void
@@ -566,7 +566,7 @@ cpsw_start_locked(struct ifnet *ifp)
 
 	printf("%s: start\n",__func__);
 
-	CPSW_TRANSMIT_LOCK_ASSERT(sc);
+	CPSW_TX_LOCK_ASSERT(sc);
 
 	if ((ifp->if_drv_flags & (IFF_DRV_RUNNING | IFF_DRV_OACTIVE)) !=
 	    IFF_DRV_RUNNING)
