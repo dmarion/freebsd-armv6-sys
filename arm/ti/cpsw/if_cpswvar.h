@@ -40,6 +40,7 @@ struct cpsw_softc {
 	struct ifnet	*ifp;
 	phandle_t	node;
 	device_t	dev;
+	uint8_t		mac_addr[ETHER_ADDR_LEN];
 	device_t	miibus;
 	struct mii_data	*mii;
 	struct mtx	tx_lock;			/* transmitter lock */

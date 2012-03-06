@@ -74,6 +74,8 @@ __FBSDID("$FreeBSD$");
 
 #include "miibus_if.h"
 
+#include <arm/debug.h> //FIXME
+
 static struct cpsw_softc *cpsw_sc = NULL;
 
 static int cpsw_probe(device_t dev);
@@ -213,12 +215,13 @@ cpsw_attach(device_t dev)
 	struct cpsw_softc *sc;
 	struct mii_softc *miisc;
 	struct ifnet *ifp;
-	uint8_t hwaddr[ETHER_ADDR_LEN] = {0xd4,0x94,0xa1,0x38,0xb9,0x13};
+	uint8_t mac_addr[ETHER_ADDR_LEN] = {0xd4,0x94,0xa1,0x38,0xb9,0x13};
 	int i, error, phy;
 	uint32_t reg;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
+	memcpy(sc->mac_addr, mac_addr, ETHER_ADDR_LEN);
 	sc->node = ofw_bus_get_node(dev);
 
 	if (device_get_unit(dev) == 0)
@@ -296,7 +299,7 @@ cpsw_attach(device_t dev)
 #if 0
 	cpsw_get_mac_address(sc, hwaddr);
 #endif
-	ether_ifattach(ifp, hwaddr);
+	ether_ifattach(ifp, sc->mac_addr);
 	callout_init(&sc->wd_callout, 0);
 
 	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
@@ -578,8 +581,16 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 	bus_dmamap_t mapp;
 	int error;
 	int seg, nsegs;
+	int i;
 
-	printf("%s: start\n",__func__);
+	printf("%s: start p=%x mh_data=%x mh_len=%x mh_type=%x mh_flags=%x\n",__func__,
+		m0,
+		m0->m_hdr.mh_data,
+		m0->m_hdr.mh_len,
+		m0->m_hdr.mh_type,
+		m0->m_hdr.mh_flags);
+
+	dump_packet(m0->m_hdr.mh_data, 128);
 
 	mapp = sc->tx_dmamap[0];
 
@@ -849,7 +860,7 @@ cpsw_init_locked(void *arg)
 	struct cpsw_cpdma_bd bd;
 	int i;
 
-	printf("%s: unimplemented\n",__func__);
+	printf("%s: start\n",__func__);
 
 	/* Reset SS */
 	cpsw_write_4(CPSW_SS_SOFT_RESET, 1);
@@ -869,7 +880,6 @@ cpsw_init_locked(void *arg)
 		cpsw_write_4(CPSW_CPDMA_RX_CP(i), 0);
         }
 
-
 	/* Reset Sliver port 0 and 1 */
 	cpsw_write_4(CPSW_SL_SOFT_RESET(0), 1);
 	while(cpsw_read_4(CPSW_SL_SOFT_RESET(0)) & 1);
@@ -878,6 +888,14 @@ cpsw_init_locked(void *arg)
 
 	//cpsw_ale_dump_table(sc);
 
+	/* Set MAC Address */
+	cpsw_write_4(CPSW_PORT_P1_SA_HI,sc->mac_addr[0] |
+		(sc->mac_addr[1] <<  8) |
+		(sc->mac_addr[2] << 16) |
+		(sc->mac_addr[3] << 24));
+	cpsw_write_4(CPSW_PORT_P1_SA_LO,sc->mac_addr[4] |
+		(sc->mac_addr[5] <<  8));
+	
 	/* Enable statistics for ports 0, 1 and 2 */
 	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
 
@@ -900,19 +918,6 @@ cpsw_init_locked(void *arg)
 		bd.next = cpsw_cpdma_rxbd_paddr(i);
 	}
 
-#if 0
-	error = bus_dmamem_alloc(sc->buffer_tag, &sc->buffer_vaddr,
-		BUS_DMA_NOWAIT, &sc->buffer_map);
-	if (error) {
-		if_printf(sc->ifp, "bus_dmamem_alloc failed\n");
-	}
-
-	error = bus_dmamap_load(sc->buffer_tag, sc->buffer_map,sc->buffer, 2048,
-		cpsw_get_dma_addr, &(sc->buffer_paddr), BUS_DMA_NOWAIT);
-
-	bus_dmamap_sync(sc->buffer_tag, sc->buffer_map, BUS_DMASYNC_PREREAD);
-	if_printf(sc->ifp," vaddr=%x paddr=%x\n", sc->buffer_vaddr, sc->buffer_paddr);
-#endif
 	/* EOI_TX_PULSE */
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 	/* EOI_RX_PULSE */
