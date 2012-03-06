@@ -95,6 +95,8 @@ static void cpsw_start(struct ifnet *ifp);
 static void cpsw_start_locked(struct ifnet *ifp);
 static int cpsw_ioctl(struct ifnet *ifp, u_long command, caddr_t data);
 static int cpsw_allocate_dma(struct cpsw_softc *sc);
+static int cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map,
+    struct mbuf **mbufp, bus_addr_t *paddr);
 
 static void cpsw_intr_rx_thresh(void *arg);
 static void cpsw_intr_rx(void *arg);
@@ -151,8 +153,8 @@ static struct {
 };
 
 
-#define DUMP_BD(p) cpsw_cpdma_read_bd(p, &bd);					\
-	printf("%s: BD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "		\
+#define DUMP_RXBD(p) cpsw_cpdma_read_rxbd(p, &bd);					\
+	printf("%s: RXBD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "		\
 	"buflen=0x%04x pktlen=0x%04x flags=0x%04x\n", __func__, p,	\
 	bd.next, bd.bufptr, bd.bufoff,bd.buflen, bd.pktlen, bd.flags)
 
@@ -489,7 +491,7 @@ cpsw_allocate_dma(struct cpsw_softc *sc)
 	int err;
 	int i;
 
-	/* Allocate a busdma tag and DMA safe memory for TX/RX descriptors. */
+	/* Allocate a busdma tag and DMA safe memory for tx mbufs. */
 	err = bus_dma_tag_create(
 		bus_get_dma_tag(sc->dev),	/* parent */
 		1, 0,				/* alignment, boundary */
@@ -498,19 +500,72 @@ cpsw_allocate_dma(struct cpsw_softc *sc)
 		NULL, NULL,			/* filtfunc, filtfuncarg */
 		MCLBYTES, 1,			/* maxsize, nsegments */
 		MCLBYTES, 0,			/* maxsegsz, flags */
-#if 0
-		busdma_lock_mutex, &sc->sc_mtx,	/* lockfunc, lockfuncarg */
-#endif
 		NULL, NULL,			/* lockfunc, lockfuncarg */
-		&sc->mbuf_dtag);		/* dmatag */
+		&sc->mbuf_tx_dtag);		/* dmatag */
 
 	if (err)
 		return (ENOMEM);
 	for (i = 0; i < CPSW_MAX_TX_BUFFERS; i++) {
-		if ( bus_dmamap_create(sc->mbuf_dtag, 0, &sc->tx_dmamap[i]))
+		if ( bus_dmamap_create(sc->mbuf_tx_dtag, 0, &sc->tx_dmamap[i])) {
+			if_printf(sc->ifp, "failed to create dmamap for rx mbuf\n");
 			return (ENOMEM);
+		}
 	}
 
+
+	/* Allocate a busdma tag and DMA safe memory for rx mbufs. */
+	err = bus_dma_tag_create(
+		bus_get_dma_tag(sc->dev),	/* parent */
+		1, 0,				/* alignment, boundary */
+		BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
+		BUS_SPACE_MAXADDR,		/* highaddr */
+		NULL, NULL,			/* filtfunc, filtfuncarg */
+		MCLBYTES, 1,			/* maxsize, nsegments */
+		MCLBYTES, 0,			/* maxsegsz, flags */
+		NULL, NULL,			/* lockfunc, lockfuncarg */
+		&sc->mbuf_rx_dtag);		/* dmatag */
+
+	for (i = 0; i < CPSW_MAX_RX_BUFFERS; i++) {
+		if ( bus_dmamap_create(sc->mbuf_rx_dtag, 0, &sc->rx_dmamap[i])) {
+			if_printf(sc->ifp, "failed to create dmamap for rx mbuf\n");
+			return (ENOMEM);
+		}
+	}
+
+	return (0);
+}
+
+static int
+cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map, struct mbuf **mbufp,
+    bus_addr_t *paddr)
+{
+	struct mbuf *new_mbuf;
+	bus_dma_segment_t seg[1];
+	int error;
+	int nsegs;
+
+	KASSERT(mbufp != NULL, ("NULL mbuf pointer!"));
+
+	new_mbuf = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
+	if (new_mbuf == NULL)
+		return (ENOBUFS);
+	new_mbuf->m_len = new_mbuf->m_pkthdr.len = new_mbuf->m_ext.ext_size;
+
+	if (*mbufp) {
+		bus_dmamap_sync(tag, map, BUS_DMASYNC_POSTREAD);
+		bus_dmamap_unload(tag, map);
+	}
+
+	error = bus_dmamap_load_mbuf_sg(tag, map, new_mbuf, seg, &nsegs,
+	    BUS_DMA_NOWAIT);
+	KASSERT(nsegs == 1, ("Too many segments returned!"));
+	if (nsegs != 1 || error)
+		panic("%s: nsegs(%d), error(%d)",__func__, nsegs, error);
+
+	bus_dmamap_sync(tag, map, BUS_DMASYNC_PREREAD);
+
+	(*mbufp) = new_mbuf;
+	(*paddr) = seg->ds_addr;
 	return (0);
 }
 
@@ -528,15 +583,15 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 	mapp = sc->tx_dmamap[0];
 
 	/* Create mapping in DMA memory */
-	error = bus_dmamap_load_mbuf_sg(sc->mbuf_dtag, mapp, m0, segs, &nsegs,
+	error = bus_dmamap_load_mbuf_sg(sc->mbuf_tx_dtag, mapp, m0, segs, &nsegs,
 	    BUS_DMA_NOWAIT);
 
 	if (error != 0 || nsegs != 1 ) {
-		bus_dmamap_unload(sc->mbuf_dtag, mapp);
+		bus_dmamap_unload(sc->mbuf_tx_dtag, mapp);
 		return ((error != 0) ? error : -1);
 	}
 
-	bus_dmamap_sync(sc->mbuf_dtag, mapp, BUS_DMASYNC_PREWRITE);
+	bus_dmamap_sync(sc->mbuf_tx_dtag, mapp, BUS_DMASYNC_PREWRITE);
 	for (seg = 0; seg < nsegs; seg++) {
 		printf("%s: seg=%u mapp=%x ds_len=%u ds_addr=%x\n", __func__,
 			seg, mapp, segs[seg].ds_len, segs[seg].ds_addr);
@@ -740,6 +795,7 @@ cpsw_intr_misc(void *arg)
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 3);
 }
 
+
 #if 0
 static void
 cpsw_get_dma_addr(void *arg, bus_dma_segment_t *segs, int nseg, int error)
@@ -789,6 +845,7 @@ static void
 cpsw_init_locked(void *arg)
 {
 	struct cpsw_softc *sc = arg;
+	struct cpsw_cpdma_bd bd;
 	int i;
 
 	printf("%s: unimplemented\n",__func__);
@@ -827,22 +884,22 @@ cpsw_init_locked(void *arg)
 	//HWREG(SOC_CONTROL_REGS + CONTROL_GMII_SEL) = 0x00;
 
 
-	/* Initialize Buffer Descriptors */
-#if 0
-	int error;
-	error = bus_dma_tag_create(NULL,	/* parent */
-		1, 0,				/* alignment, boundary */
-		BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
-		BUS_SPACE_MAXADDR,		/* highaddr */
-		NULL, NULL,			/* filtfunc, filtfuncarg */
-		MCLBYTES, 1,			/* maxsize, nsegments */
-		MCLBYTES, 0,			/* maxsegsz, flags */
-		NULL, NULL,			/* lockfunc, lockfuncarg */
-		&sc->buffer_tag);		/* dmat */
-	if (error) {
-		if_printf(sc->ifp, "failed to create busdma tag for mbufs\n");
+	/* Initialize RX Buffer Descriptors */
+	i = CPSW_MAX_RX_BUFFERS;
+	bd.next = NULL;
+	while (i--) {
+		bd.bufptr = 0;
+		bd.buflen = 0;
+		bd.pktlen = 0;
+		bd.flags = (1<<13);
+		cpsw_new_rxbuf(sc->mbuf_rx_dtag, sc->rx_dmamap[i],
+			&sc->rx_mbuf[i], (bus_addr_t *) &bd.bufptr);
+		cpsw_cpdma_write_rxbd(i, &bd);
+		DUMP_RXBD(i);
+		bd.next = cpsw_cpdma_rxbd_paddr(i);
 	}
 
+#if 0
 	error = bus_dmamem_alloc(sc->buffer_tag, &sc->buffer_vaddr,
 		BUS_DMA_NOWAIT, &sc->buffer_map);
 	if (error) {
@@ -853,18 +910,7 @@ cpsw_init_locked(void *arg)
 		cpsw_get_dma_addr, &(sc->buffer_paddr), BUS_DMA_NOWAIT);
 
 	bus_dmamap_sync(sc->buffer_tag, sc->buffer_map, BUS_DMASYNC_PREREAD);
-
 	if_printf(sc->ifp," vaddr=%x paddr=%x\n", sc->buffer_vaddr, sc->buffer_paddr);
-
-	bd.next = NULL;
-	bd.bufptr= sc->buffer_paddr;
-	bd.bufoff = 0;
-	bd.buflen = 2048;
-	bd.flags = (1<<13);
-	cpsw_cpdma_write_bd(0, &bd);
-
-	DUMP_BD(0);
-//	panic("DONE\n");
 #endif
 	/* EOI_TX_PULSE */
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);

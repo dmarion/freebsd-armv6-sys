@@ -34,6 +34,7 @@
 #define CPSW_MIIBUS_DELAY	1000
 
 #define CPSW_MAX_TX_BUFFERS	32
+#define CPSW_MAX_RX_BUFFERS	32
 
 struct cpsw_softc {
 	struct ifnet	*ifp;
@@ -52,9 +53,12 @@ struct cpsw_softc {
 	struct callout	wd_callout;
 	int		wd_timer;
 
-	/* TX mbufs */
-	bus_dma_tag_t	mbuf_dtag;
-	bus_dmamap_t    tx_dmamap[CPSW_MAX_TX_BUFFERS];
+	/* buffers */
+	bus_dma_tag_t	mbuf_tx_dtag;
+	bus_dma_tag_t	mbuf_rx_dtag;
+	bus_dmamap_t	tx_dmamap[CPSW_MAX_TX_BUFFERS];
+	bus_dmamap_t	rx_dmamap[CPSW_MAX_RX_BUFFERS];
+	struct mbuf	*rx_mbuf[CPSW_MAX_RX_BUFFERS];
 };
 
 struct cpsw_cpdma_bd {
@@ -72,9 +76,23 @@ struct cpsw_cpdma_bd {
 #define cpsw_write_4(reg, val)		\
 	bus_write_4(sc->res[0], reg, val)
 
-#define cpsw_cpdma_read_bd(i, val)	\
-	bus_read_region_4(sc->res[0], CPSW_CPPI_RAM_OFFSET + (i*16), val, 16)
-#define cpsw_cpdma_write_bd(i, val)	\
-	bus_write_region_4(sc->res[0], CPSW_CPPI_RAM_OFFSET + (i*16), val, 16)
+
+#define CPSW_BASE	0x4a102000	// FIXME
+
+#define cpsw_cpdma_txbd_offset(i)	\
+	(CPSW_CPPI_RAM_OFFSET + ((i)*16))
+#define cpsw_cpdma_txbd_paddr(i)	(cpsw_cpdma_txbd_offset(i) + CPSW_BASE)
+#define cpsw_cpdma_read_txbd(i, val)	\
+	bus_read_region_4(sc->res[0], cpsw_cpdma_txbd_offset(i), val, 16)
+#define cpsw_cpdma_write_txbd(i, val)	\
+	bus_write_region_4(sc->res[0], cpsw_cpdma_txbd_offset(i), val, 16)
+
+#define cpsw_cpdma_rxbd_offset(i)		\
+	(CPSW_CPPI_RAM_OFFSET + ((CPSW_MAX_TX_BUFFERS + (i))*16))
+#define cpsw_cpdma_rxbd_paddr(i)	(cpsw_cpdma_rxbd_offset(i) + CPSW_BASE)
+#define cpsw_cpdma_read_rxbd(i, val)	\
+	bus_read_region_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), val, 16)
+#define cpsw_cpdma_write_rxbd(i, val)	\
+	bus_write_region_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), val, 16)
 
 #endif /*_IF_CPSWVAR_H */
