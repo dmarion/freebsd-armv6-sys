@@ -33,8 +33,8 @@
 #define CPSW_MIIBUS_RETRIES	5
 #define CPSW_MIIBUS_DELAY	1000
 
-#define CPSW_MAX_TX_BUFFERS	32
-#define CPSW_MAX_RX_BUFFERS	32
+#define CPSW_MAX_TX_BUFFERS	8
+#define CPSW_MAX_RX_BUFFERS	8
 
 struct cpsw_softc {
 	struct ifnet	*ifp;

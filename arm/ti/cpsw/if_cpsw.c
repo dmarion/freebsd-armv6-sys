@@ -552,6 +552,7 @@ cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map, struct mbuf **mbufp,
 	new_mbuf->m_len = new_mbuf->m_pkthdr.len = new_mbuf->m_ext.ext_size;
 
 	if (*mbufp) {
+		printf("unloading... 0x%x\n",map);
 		bus_dmamap_sync(tag, map, BUS_DMASYNC_POSTREAD);
 		bus_dmamap_unload(tag, map);
 	}
@@ -563,7 +564,7 @@ cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map, struct mbuf **mbufp,
 		panic("%s: nsegs(%d), error(%d)",__func__, nsegs, error);
 
 	bus_dmamap_sync(tag, map, BUS_DMASYNC_PREREAD);
-
+	printf("loading... 0x%x\n",map);
 	(*mbufp) = new_mbuf;
 	(*paddr) = seg->ds_addr;
 	return (0);
@@ -889,7 +890,7 @@ cpsw_init_locked(void *arg)
 	bd.next = NULL;
 	while (i--) {
 		bd.bufptr = 0;
-		bd.buflen = 0;
+		bd.buflen = MCLBYTES;
 		bd.pktlen = 0;
 		bd.flags = (1<<13);
 		cpsw_new_rxbuf(sc->mbuf_rx_dtag, sc->rx_dmamap[i],
@@ -931,7 +932,7 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_SL_MACCONTROL(1), (1<<5) | (3<<15));
 
 	/* Write channel 0 RX HDP */
-	 cpsw_write_4(CPSW_CPDMA_RX_HDP(0), 0x4a102000);  // FIXME active_head
+	 cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
 
 	/* Enable interrupts for TX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
