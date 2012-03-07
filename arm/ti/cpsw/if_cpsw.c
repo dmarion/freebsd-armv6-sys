@@ -555,7 +555,6 @@ cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map, struct mbuf **mbufp,
 	new_mbuf->m_len = new_mbuf->m_pkthdr.len = new_mbuf->m_ext.ext_size;
 
 	if (*mbufp) {
-		printf("unloading... 0x%x\n",map);
 		bus_dmamap_sync(tag, map, BUS_DMASYNC_POSTREAD);
 		bus_dmamap_unload(tag, map);
 	}
@@ -567,7 +566,6 @@ cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map, struct mbuf **mbufp,
 		panic("%s: nsegs(%d), error(%d)",__func__, nsegs, error);
 
 	bus_dmamap_sync(tag, map, BUS_DMASYNC_PREREAD);
-	printf("loading... 0x%x\n",map);
 	(*mbufp) = new_mbuf;
 	(*paddr) = seg->ds_addr;
 	return (0);
@@ -847,7 +845,6 @@ static void
 cpsw_init(void *arg)
 {
 	struct cpsw_softc *sc = arg;
-	printf("%s: unimplemented\n",__func__);
 	CPSW_GLOBAL_LOCK(sc);
 	cpsw_init_locked(arg);
 	CPSW_GLOBAL_UNLOCK(sc);
@@ -878,6 +875,7 @@ cpsw_init_locked(void *arg)
 		cpsw_write_4(CPSW_CPDMA_RX_HDP(i), 0);
 		cpsw_write_4(CPSW_CPDMA_TX_CP(i), 0);
 		cpsw_write_4(CPSW_CPDMA_RX_CP(i), 0);
+		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(i), 0);
         }
 
 	/* Reset Sliver port 0 and 1 */
@@ -895,13 +893,28 @@ cpsw_init_locked(void *arg)
 		(sc->mac_addr[3] << 24));
 	cpsw_write_4(CPSW_PORT_P1_SA_LO,sc->mac_addr[4] |
 		(sc->mac_addr[5] <<  8));
-	
+
 	/* Enable statistics for ports 0, 1 and 2 */
 	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
 
         /* Select MII, Internal Delay mode */
 	//HWREG(SOC_CONTROL_REGS + CONTROL_GMII_SEL) = 0x00;
 
+	/* EOI_TX_PULSE */
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
+	/* EOI_RX_PULSE */
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
+
+	/* Set MACCONTROL for ports 0,1: FULLDUPLEX(1), GMII_EN(5),
+	   IFCTL_A(15), IFCTL_B(16) FIXME */
+	cpsw_write_4(CPSW_SL_MACCONTROL(0), 1 | (1<<5) | (3<<15));
+	cpsw_write_4(CPSW_SL_MACCONTROL(1), 1 | (1<<5) | (3<<15));
+
+	/* Enable TX DMA */
+	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
+
+	/* Enable RX DMA  */
+	cpsw_write_4(CPSW_CPDMA_RX_CONTROL, 1);
 
 	/* Initialize RX Buffer Descriptors */
 	i = CPSW_MAX_RX_BUFFERS;
@@ -914,30 +927,17 @@ cpsw_init_locked(void *arg)
 		cpsw_new_rxbuf(sc->mbuf_rx_dtag, sc->rx_dmamap[i],
 			&sc->rx_mbuf[i], (bus_addr_t *) &bd.bufptr);
 		cpsw_cpdma_write_rxbd(i, &bd);
+		/* Increment number of free RX buffers */
+		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 1);
 		DUMP_RXBD(i);
 		bd.next = cpsw_cpdma_rxbd_paddr(i);
 	}
 
-	/* EOI_TX_PULSE */
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
-	/* EOI_RX_PULSE */
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
-
 	/* Set number of free rx buffers to 0 */
-	cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 0);
-
-	/* Enable TX DMA */
-	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
-
-	/* Enable RX DMA  */
-	cpsw_write_4(CPSW_CPDMA_RX_CONTROL, 1);
-
-	/* Set MACCONTROL for ports 0,1 GMII_EN(5), IFCTL_A(15), IFCTL_B(16) */
-	cpsw_write_4(CPSW_SL_MACCONTROL(0), (1<<5) | (3<<15));
-	cpsw_write_4(CPSW_SL_MACCONTROL(1), (1<<5) | (3<<15));
+	//cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 0);
 
 	/* Write channel 0 RX HDP */
-	 cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
+	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
 
 	/* Enable interrupts for TX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
