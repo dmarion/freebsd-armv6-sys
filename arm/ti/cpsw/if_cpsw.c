@@ -574,14 +574,10 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 	struct cpsw_cpdma_bd bd;
 	int error;
 	int seg, nsegs;
-	int i;
 
-	printf("%s: start p=%x mh_data=%x mh_len=%x mh_type=%x mh_flags=%x\n",__func__,
-		m0,
-		m0->m_hdr.mh_data,
-		m0->m_hdr.mh_len,
-		m0->m_hdr.mh_type,
-		m0->m_hdr.mh_flags);
+	printf("%s: start p=%x mh_data=%x mh_len=%x mh_type=%x mh_flags=%x\n",
+		__func__, (uint32_t) m0, (uint32_t) m0->m_hdr.mh_data,
+		m0->m_hdr.mh_len, m0->m_hdr.mh_type, m0->m_hdr.mh_flags);
 
 	dump_packet(m0->m_hdr.mh_data, 128);
 
@@ -599,7 +595,8 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 	bus_dmamap_sync(sc->mbuf_dtag, mapp, BUS_DMASYNC_PREWRITE);
 	for (seg = 0; seg < nsegs; seg++) {
 		printf("%s: seg=%u mapp=%x ds_len=%u ds_addr=%x\n", __func__,
-			seg, mapp, segs[seg].ds_len, segs[seg].ds_addr);
+			seg, (uint32_t) mapp, (uint32_t) segs[seg].ds_len,
+			(uint32_t) segs[seg].ds_addr);
 		bd.next = NULL;
 		bd.bufptr = segs[seg].ds_addr;
 		bd.buflen = segs[seg].ds_len;
@@ -630,8 +627,6 @@ cpsw_start_locked(struct ifnet *ifp)
 	struct cpsw_softc *sc = ifp->if_softc;
 	struct mbuf *m0, *mtmp;
 	uint32_t queued = 0;
-	struct cpsw_cpdma_bd bd;
-	uint32_t c[4];
 
 	printf("%s: start\n",__func__);
 
@@ -878,43 +873,16 @@ cpsw_init_locked(void *arg)
 	struct cpsw_softc *sc = arg;
 	struct cpsw_cpdma_bd bd;
 	uint32_t i;
+#if 0
 	uint32_t p1[0x2000];
 	uint32_t p2[256];
 	uint32_t p3[256];
 	uint32_t x;
-
+#endif
 	printf("%s: start\n",__func__);
-#if 0
 	/* Reset SS */
 	cpsw_write_4(CPSW_SS_SOFT_RESET, 1);
 	while(cpsw_read_4(CPSW_SS_SOFT_RESET) & 1);
-
-	/* Reset writer */
-	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
-	while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
-
-	/* Reset Sliver port 0 and 1 */
-	cpsw_write_4(CPSW_SL_SOFT_RESET(0), 1);
-	while(cpsw_read_4(CPSW_SL_SOFT_RESET(0)) & 1);
-	cpsw_write_4(CPSW_SL_SOFT_RESET(1), 1);
-	while(cpsw_read_4(CPSW_SL_SOFT_RESET(1)) & 1);
-
-	for(i=0;i<0xFF;i+=4) {
-		p1[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + i);
-		p2[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + 0x200 + i);
-		p3[i] = cpsw_read_4(CPSW_WR_OFFSET + i);
-	}
-#endif
-
-#define START	0x1000
-#define STOP	0x1100
-
-	for(i=START;i<STOP;i+=4) {
-		x = cpsw_read_4(i);
-//		if(x)	printf("0x%04x = 0x%08x\n", i,x);
-		p1[i] = x;
-	}
-	printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
 
 	/* Reset DMA */
 	cpsw_write_4(CPSW_CPDMA_SOFT_RESET, 1);
@@ -927,8 +895,23 @@ cpsw_init_locked(void *arg)
 		cpsw_write_4(CPSW_CPDMA_RX_CP(i), 0);
 		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(i), 0);
         }
-#if 0
-	//cpsw_ale_dump_table(sc);
+
+	/* Reset writer */
+	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
+	while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
+
+	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
+	/* TODO Calculate MDCLK=CLK/(CLKDIV+1) */
+	cpsw_write_4(MDIOCONTROL, (1<<30) | (1<<18) | 0xFF);
+
+	/* Enable statistics for ports 0, 1 and 2 */
+	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
+
+	/* Reset Sliver port 0 and 1 */
+	cpsw_write_4(CPSW_SL_SOFT_RESET(0), 1);
+	while(cpsw_read_4(CPSW_SL_SOFT_RESET(0)) & 1);
+	cpsw_write_4(CPSW_SL_SOFT_RESET(1), 1);
+	while(cpsw_read_4(CPSW_SL_SOFT_RESET(1)) & 1);
 
 	/* Set MAC Address */
 	cpsw_write_4(CPSW_PORT_P1_SA_HI,sc->mac_addr[0] |
@@ -938,22 +921,8 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_PORT_P1_SA_LO,sc->mac_addr[4] |
 		(sc->mac_addr[5] <<  8));
 
-	/* Enable statistics for ports 0, 1 and 2 */
-	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
-
         /* Select MII in GMII_SEL, Internal Delay mode */
 	ti_scm_reg_write_4(0x650, 0);
-	ti_scm_reg_read_4(0x630,&x); printf("630 %x\n", x);
-	ti_scm_reg_read_4(0x634,&x); printf("634 %x\n", x);
-	ti_scm_reg_read_4(0x638,&x); printf("638 %x\n", x);
-	ti_scm_reg_read_4(0x63c,&x); printf("63c %x\n", x);
-
-
-#endif
-	/* EOI */
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 0);
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 
 	/* Set MACCONTROL for ports 0,1: FULLDUPLEX(1), GMII_EN(5),
 	   IFCTL_A(15), IFCTL_B(16) FIXME */
@@ -973,19 +942,26 @@ cpsw_init_locked(void *arg)
 		/* Increment number of free RX buffers */
 		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 1);
 		//DUMP_RXBD(i);
-		bd.next = cpsw_cpdma_rxbd_paddr(i);
+		bd.next = (struct cpsw_cpdma_bd *) cpsw_cpdma_rxbd_paddr(i);
 	}
 
-	/* Clear all interrupt Masks */
-	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_CLEAR, 0xFFFFFFFF);
-	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_CLEAR, 0xFFFFFFFF);
+	/* Write channel 0 RX HDP */
+	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
+
 
 	/* Enable TX & RX DMA */
 	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
 	cpsw_write_4(CPSW_CPDMA_RX_CONTROL, 1);
 
-	/* Write channel 0 RX HDP */
-	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
+	/* Clear all interrupt Masks */
+	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_CLEAR, 0xFFFFFFFF);
+	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_CLEAR, 0xFFFFFFFF);
+
+	/* Ack stalled irqs */
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 0);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 3);
 
 	/* Enable interrupts for TX and RX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
@@ -996,11 +972,32 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0xFF);
 	//cpsw_write_4(CPSW_WR_C_MISC_EN(0), 0xFF);
 
-	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
-	/* TODO Calculate MDCLK=CLK/(CLKDIV+1) */
-	cpsw_write_4(MDIOCONTROL, (1<<30) | (1<<18) | 0xFF);
 
-#if 1
+#if 0
+
+
+	for(i=0;i<0xFF;i+=4) {
+		p1[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + i);
+		p2[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + 0x200 + i);
+		p3[i] = cpsw_read_4(CPSW_WR_OFFSET + i);
+	}
+
+#define START	0x1000
+#define STOP	0x1100
+
+	for(i=START;i<STOP;i+=4) {
+		x = cpsw_read_4(i);
+//		if(x)	printf("0x%04x = 0x%08x\n", i,x);
+		p1[i] = x;
+	}
+	printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
+
+	//cpsw_ale_dump_table(sc);
+	ti_scm_reg_read_4(0x630,&x); printf("630 %x\n", x);
+	ti_scm_reg_read_4(0x634,&x); printf("634 %x\n", x);
+	ti_scm_reg_read_4(0x638,&x); printf("638 %x\n", x);
+	ti_scm_reg_read_4(0x63c,&x); printf("63c %x\n", x);
+
 	for(i=START;i<STOP;i+=4) {
 		x = cpsw_read_4(i);
 		if (p1[i]  != x)

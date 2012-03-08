@@ -83,16 +83,16 @@ struct cpsw_cpdma_bd {
 	(CPSW_CPPI_RAM_OFFSET + ((i)*16))
 #define cpsw_cpdma_txbd_paddr(i)	(cpsw_cpdma_txbd_offset(i) + CPSW_BASE)
 #define cpsw_cpdma_read_txbd(i, val)	\
-	bus_read_region_4(sc->res[0], cpsw_cpdma_txbd_offset(i), val, 16)
+	bus_read_region_4(sc->res[0], cpsw_cpdma_txbd_offset(i), (uint32_t *) val, 16)
 #define cpsw_cpdma_write_txbd(i, val)	\
-	bus_write_region_4(sc->res[0], cpsw_cpdma_txbd_offset(i), val, 16)
+	bus_write_region_4(sc->res[0], cpsw_cpdma_txbd_offset(i), (uint32_t *) val, 16)
 
 #define cpsw_cpdma_rxbd_offset(i)		\
 	(CPSW_CPPI_RAM_OFFSET + ((CPSW_MAX_TX_BUFFERS + (i))*16))
 #define cpsw_cpdma_rxbd_paddr(i)	(cpsw_cpdma_rxbd_offset(i) + CPSW_BASE)
 #define cpsw_cpdma_read_rxbd(i, val)	\
-	bus_read_region_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), val, 16)
+	bus_read_region_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), (uint32_t *) val, 16)
 #define cpsw_cpdma_write_rxbd(i, val)	\
-	bus_write_region_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), val, 16)
+	bus_write_region_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), (uint32_t *) val, 16)
 
 #endif /*_IF_CPSWVAR_H */
