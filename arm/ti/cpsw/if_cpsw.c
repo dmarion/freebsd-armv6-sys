@@ -71,6 +71,8 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/ti/cpsw/if_cpswreg.h>
 #include <arm/ti/cpsw/if_cpswvar.h>
+ 
+#include <arm/ti/ti_scm.h>
 
 #include "miibus_if.h"
 
@@ -157,6 +159,11 @@ static struct {
 
 #define DUMP_RXBD(p) cpsw_cpdma_read_rxbd(p, &bd);					\
 	printf("%s: RXBD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "		\
+	"buflen=0x%04x pktlen=0x%04x flags=0x%04x\n", __func__, p,	\
+	bd.next, bd.bufptr, bd.bufoff,bd.buflen, bd.pktlen, bd.flags)
+
+#define DUMP_TXBD(p) cpsw_cpdma_read_txbd(p, &bd);					\
+	printf("%s: TXBD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "		\
 	"buflen=0x%04x pktlen=0x%04x flags=0x%04x\n", __func__, p,	\
 	bd.next, bd.bufptr, bd.bufoff,bd.buflen, bd.pktlen, bd.flags)
 
@@ -504,32 +511,19 @@ cpsw_allocate_dma(struct cpsw_softc *sc)
 		MCLBYTES, 1,			/* maxsize, nsegments */
 		MCLBYTES, 0,			/* maxsegsz, flags */
 		NULL, NULL,			/* lockfunc, lockfuncarg */
-		&sc->mbuf_tx_dtag);		/* dmatag */
+		&sc->mbuf_dtag);		/* dmatag */
 
 	if (err)
 		return (ENOMEM);
 	for (i = 0; i < CPSW_MAX_TX_BUFFERS; i++) {
-		if ( bus_dmamap_create(sc->mbuf_tx_dtag, 0, &sc->tx_dmamap[i])) {
+		if ( bus_dmamap_create(sc->mbuf_dtag, 0, &sc->tx_dmamap[i])) {
 			if_printf(sc->ifp, "failed to create dmamap for rx mbuf\n");
 			return (ENOMEM);
 		}
 	}
 
-
-	/* Allocate a busdma tag and DMA safe memory for rx mbufs. */
-	err = bus_dma_tag_create(
-		bus_get_dma_tag(sc->dev),	/* parent */
-		1, 0,				/* alignment, boundary */
-		BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
-		BUS_SPACE_MAXADDR,		/* highaddr */
-		NULL, NULL,			/* filtfunc, filtfuncarg */
-		MCLBYTES, 1,			/* maxsize, nsegments */
-		MCLBYTES, 0,			/* maxsegsz, flags */
-		NULL, NULL,			/* lockfunc, lockfuncarg */
-		&sc->mbuf_rx_dtag);		/* dmatag */
-
 	for (i = 0; i < CPSW_MAX_RX_BUFFERS; i++) {
-		if ( bus_dmamap_create(sc->mbuf_rx_dtag, 0, &sc->rx_dmamap[i])) {
+		if ( bus_dmamap_create(sc->mbuf_dtag, 0, &sc->rx_dmamap[i])) {
 			if_printf(sc->ifp, "failed to create dmamap for rx mbuf\n");
 			return (ENOMEM);
 		}
@@ -577,6 +571,7 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 {
 	bus_dma_segment_t segs[512];	// FIXME
 	bus_dmamap_t mapp;
+	struct cpsw_cpdma_bd bd;
 	int error;
 	int seg, nsegs;
 	int i;
@@ -593,18 +588,25 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 	mapp = sc->tx_dmamap[0];
 
 	/* Create mapping in DMA memory */
-	error = bus_dmamap_load_mbuf_sg(sc->mbuf_tx_dtag, mapp, m0, segs, &nsegs,
+	error = bus_dmamap_load_mbuf_sg(sc->mbuf_dtag, mapp, m0, segs, &nsegs,
 	    BUS_DMA_NOWAIT);
 
 	if (error != 0 || nsegs != 1 ) {
-		bus_dmamap_unload(sc->mbuf_tx_dtag, mapp);
+		bus_dmamap_unload(sc->mbuf_dtag, mapp);
 		return ((error != 0) ? error : -1);
 	}
 
-	bus_dmamap_sync(sc->mbuf_tx_dtag, mapp, BUS_DMASYNC_PREWRITE);
+	bus_dmamap_sync(sc->mbuf_dtag, mapp, BUS_DMASYNC_PREWRITE);
 	for (seg = 0; seg < nsegs; seg++) {
 		printf("%s: seg=%u mapp=%x ds_len=%u ds_addr=%x\n", __func__,
 			seg, mapp, segs[seg].ds_len, segs[seg].ds_addr);
+		bd.next = NULL;
+		bd.bufptr = segs[seg].ds_addr;
+		bd.buflen = segs[seg].ds_len;
+		bd.pktlen = segs[seg].ds_len;
+		/*Set OWNERSHIP, SOP, EOP */
+		bd.flags = (7<<13);
+		cpsw_cpdma_write_txbd(0, &bd);
 	}
 
 	printf("%s: end\n",__func__);
@@ -628,6 +630,8 @@ cpsw_start_locked(struct ifnet *ifp)
 	struct cpsw_softc *sc = ifp->if_softc;
 	struct mbuf *m0, *mtmp;
 	uint32_t queued = 0;
+	struct cpsw_cpdma_bd bd;
+	uint32_t c[4];
 
 	printf("%s: start\n",__func__);
 
@@ -660,6 +664,17 @@ cpsw_start_locked(struct ifnet *ifp)
 	if (queued) {
 		/* Enable transmitter and watchdog timer */
 		printf("%s: process queued\n",__func__);
+		printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
+		cpsw_write_4(CPSW_CPDMA_TX_HDP(0), cpsw_cpdma_txbd_paddr(0));
+		printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
+		printf("%s: CPSW_CPDMA_DMASTATUS = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
+		printf("%s: CPSW_CPDMA_TX_INTSTAT_RAW = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTSTAT_RAW));
+		printf("%s: CPSW_CPDMA_TX_INTSTAT_MASKED = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTSTAT_MASKED));
+		printf("%s: CPSW_CPDMA_TX_INTMASK_SET = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTMASK_SET));
+		printf("%s: CPSW_CPDMA_TX_INTMASK_CLEAR = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTMASK_CLEAR));
+		printf("%s: C0_RX_EN = 0x%x\n",__func__,	cpsw_read_4(CPSW_WR_OFFSET + 0x14));
+		printf("%s: C0_TX_EN = 0x%x\n",__func__,	cpsw_read_4(CPSW_WR_OFFSET + 0x18));
+		//DUMP_TXBD(0);
 		//sc->wd_timer = 5;
 	}
 	printf("%s: done\n",__func__);
@@ -789,9 +804,17 @@ cpsw_intr_tx(void *arg)
 {
 	struct cpsw_softc *sc = arg;
 	printf("%s: unimplemented\n",__func__);
-	printf("CPSW_WR_C_TX_STAT(0)=%x\n", cpsw_read_4(CPSW_WR_C_TX_STAT(0)));
-	printf("CPSW_CPDMA_TX_HDP(0)=%x\n", cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
-	printf("CPSW_CPDMA_TX_CP(0)=%x\n", cpsw_read_4(CPSW_CPDMA_TX_CP(0)));
+	printf("%s: CPSW_CPDMA_TX_CP(0) = %x\n", __func__, cpsw_read_4(CPSW_CPDMA_TX_CP(0)));
+	printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
+	printf("%s: CPSW_CPDMA_DMASTATUS = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
+	printf("%s: CPSW_CPDMA_TX_INTSTAT_RAW = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTSTAT_RAW));
+	printf("%s: CPSW_CPDMA_TX_INTSTAT_MASKED = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTSTAT_MASKED));
+	printf("%s: CPSW_CPDMA_TX_INTMASK_SET = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTMASK_SET));
+	printf("%s: CPSW_CPDMA_TX_INTMASK_CLEAR = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTMASK_CLEAR));
+	printf("%s: CPSW_WR_C0_RX_EN = 0x%x\n",__func__,	cpsw_read_4(CPSW_WR_OFFSET + 0x14));
+	printf("%s: CPSW_WR_C0_TX_EN = 0x%x\n",__func__,	cpsw_read_4(CPSW_WR_OFFSET + 0x18));
+	printf("%s: CPSW_WR_C0_TX_STAT = 0x%x\n", __func__, cpsw_read_4(CPSW_WR_C_TX_STAT(0)));
+	printf("%s: CPSW_WR_C0_RX_STAT = 0x%x\n", __func__, cpsw_read_4(CPSW_WR_C_RX_STAT(0)));
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 }
 
@@ -800,8 +823,7 @@ cpsw_intr_misc(void *arg)
 {
 	struct cpsw_softc *sc = arg;
 	/* EOI_RX_PULSE */
-	printf("%s: misc_stat=%x\n", __func__,
-		 cpsw_read_4(CPSW_WR_C_MISC_STAT(0)));
+	printf("%s: misc_stat=%x\n", __func__, cpsw_read_4(CPSW_WR_C_MISC_STAT(0)));
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 3);
 }
 
@@ -855,10 +877,14 @@ cpsw_init_locked(void *arg)
 {
 	struct cpsw_softc *sc = arg;
 	struct cpsw_cpdma_bd bd;
-	int i;
+	uint32_t i;
+	uint32_t p1[0x2000];
+	uint32_t p2[256];
+	uint32_t p3[256];
+	uint32_t x;
 
 	printf("%s: start\n",__func__);
-
+#if 0
 	/* Reset SS */
 	cpsw_write_4(CPSW_SS_SOFT_RESET, 1);
 	while(cpsw_read_4(CPSW_SS_SOFT_RESET) & 1);
@@ -867,9 +893,33 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
 	while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
 
+	/* Reset Sliver port 0 and 1 */
+	cpsw_write_4(CPSW_SL_SOFT_RESET(0), 1);
+	while(cpsw_read_4(CPSW_SL_SOFT_RESET(0)) & 1);
+	cpsw_write_4(CPSW_SL_SOFT_RESET(1), 1);
+	while(cpsw_read_4(CPSW_SL_SOFT_RESET(1)) & 1);
+
+	for(i=0;i<0xFF;i+=4) {
+		p1[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + i);
+		p2[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + 0x200 + i);
+		p3[i] = cpsw_read_4(CPSW_WR_OFFSET + i);
+	}
+#endif
+
+#define START	0x1000
+#define STOP	0x1100
+
+	for(i=START;i<STOP;i+=4) {
+		x = cpsw_read_4(i);
+//		if(x)	printf("0x%04x = 0x%08x\n", i,x);
+		p1[i] = x;
+	}
+	printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
+
 	/* Reset DMA */
 	cpsw_write_4(CPSW_CPDMA_SOFT_RESET, 1);
 	while(cpsw_read_4(CPSW_CPDMA_SOFT_RESET) & 1);
+
         for(i = 0; i < 8; i++) {
 		cpsw_write_4(CPSW_CPDMA_TX_HDP(i), 0);
 		cpsw_write_4(CPSW_CPDMA_RX_HDP(i), 0);
@@ -877,13 +927,7 @@ cpsw_init_locked(void *arg)
 		cpsw_write_4(CPSW_CPDMA_RX_CP(i), 0);
 		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(i), 0);
         }
-
-	/* Reset Sliver port 0 and 1 */
-	cpsw_write_4(CPSW_SL_SOFT_RESET(0), 1);
-	while(cpsw_read_4(CPSW_SL_SOFT_RESET(0)) & 1);
-	cpsw_write_4(CPSW_SL_SOFT_RESET(1), 1);
-	while(cpsw_read_4(CPSW_SL_SOFT_RESET(1)) & 1);
-
+#if 0
 	//cpsw_ale_dump_table(sc);
 
 	/* Set MAC Address */
@@ -897,61 +941,74 @@ cpsw_init_locked(void *arg)
 	/* Enable statistics for ports 0, 1 and 2 */
 	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
 
-        /* Select MII, Internal Delay mode */
-	//HWREG(SOC_CONTROL_REGS + CONTROL_GMII_SEL) = 0x00;
+        /* Select MII in GMII_SEL, Internal Delay mode */
+	ti_scm_reg_write_4(0x650, 0);
+	ti_scm_reg_read_4(0x630,&x); printf("630 %x\n", x);
+	ti_scm_reg_read_4(0x634,&x); printf("634 %x\n", x);
+	ti_scm_reg_read_4(0x638,&x); printf("638 %x\n", x);
+	ti_scm_reg_read_4(0x63c,&x); printf("63c %x\n", x);
 
-	/* EOI_TX_PULSE */
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
-	/* EOI_RX_PULSE */
+
+#endif
+	/* EOI */
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 0);
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 
 	/* Set MACCONTROL for ports 0,1: FULLDUPLEX(1), GMII_EN(5),
 	   IFCTL_A(15), IFCTL_B(16) FIXME */
-	cpsw_write_4(CPSW_SL_MACCONTROL(0), 1 | (1<<5) | (3<<15));
-	cpsw_write_4(CPSW_SL_MACCONTROL(1), 1 | (1<<5) | (3<<15));
-
-	/* Enable TX DMA */
-	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
-
-	/* Enable RX DMA  */
-	cpsw_write_4(CPSW_CPDMA_RX_CONTROL, 1);
+	cpsw_write_4(CPSW_SL_MACCONTROL(0), 1 | (1<<5) | (1<<15));
+	cpsw_write_4(CPSW_SL_MACCONTROL(1), 1 | (1<<5) | (1<<15));
 
 	/* Initialize RX Buffer Descriptors */
 	i = CPSW_MAX_RX_BUFFERS;
 	bd.next = NULL;
 	while (i--) {
-		bd.bufptr = 0;
 		bd.buflen = MCLBYTES;
 		bd.pktlen = 0;
 		bd.flags = (1<<13);
-		cpsw_new_rxbuf(sc->mbuf_rx_dtag, sc->rx_dmamap[i],
+		cpsw_new_rxbuf(sc->mbuf_dtag, sc->rx_dmamap[i],
 			&sc->rx_mbuf[i], (bus_addr_t *) &bd.bufptr);
 		cpsw_cpdma_write_rxbd(i, &bd);
 		/* Increment number of free RX buffers */
 		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 1);
-		DUMP_RXBD(i);
+		//DUMP_RXBD(i);
 		bd.next = cpsw_cpdma_rxbd_paddr(i);
 	}
 
-	/* Set number of free rx buffers to 0 */
-	//cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 0);
+	/* Clear all interrupt Masks */
+	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_CLEAR, 0xFFFFFFFF);
+	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_CLEAR, 0xFFFFFFFF);
+
+	/* Enable TX & RX DMA */
+	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
+	cpsw_write_4(CPSW_CPDMA_RX_CONTROL, 1);
 
 	/* Write channel 0 RX HDP */
 	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
 
-	/* Enable interrupts for TX Channel 0 */
+	/* Enable interrupts for TX and RX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
-	/* Enable TX interrupt receive for core 0 */
-	cpsw_write_4(CPSW_WR_C_TX_EN(0), 1);
-
-	/* Enable interrupts for RX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_SET, 1);
-	/* Enable RX interrupt receive for core 0 */
-	cpsw_write_4(CPSW_WR_C_RX_EN(0), 1);
+
+	/* Enable TX and RX interrupt receive for core 0 */
+	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0xFF);
+	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0xFF);
+	//cpsw_write_4(CPSW_WR_C_MISC_EN(0), 0xFF);
 
 	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
 	/* TODO Calculate MDCLK=CLK/(CLKDIV+1) */
 	cpsw_write_4(MDIOCONTROL, (1<<30) | (1<<18) | 0xFF);
+
+#if 1
+	for(i=START;i<STOP;i+=4) {
+		x = cpsw_read_4(i);
+		if (p1[i]  != x)
+			printf("0x%04x = 0x%08x -> 0x%08x\n", i,p1[i],x);
+		else if(x)
+			printf("0x%04x = 0x%08x\n", i,x);
+	}
+#endif
 
 	/* Activate network interface */
 	sc->ifp->if_drv_flags |= IFF_DRV_RUNNING;

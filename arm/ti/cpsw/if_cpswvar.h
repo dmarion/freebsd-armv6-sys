@@ -55,8 +55,7 @@ struct cpsw_softc {
 	int		wd_timer;
 
 	/* buffers */
-	bus_dma_tag_t	mbuf_tx_dtag;
-	bus_dma_tag_t	mbuf_rx_dtag;
+	bus_dma_tag_t	mbuf_dtag;
 	bus_dmamap_t	tx_dmamap[CPSW_MAX_TX_BUFFERS];
 	bus_dmamap_t	rx_dmamap[CPSW_MAX_RX_BUFFERS];
 	struct mbuf	*rx_mbuf[CPSW_MAX_RX_BUFFERS];
@@ -78,7 +77,7 @@ struct cpsw_cpdma_bd {
 	bus_write_4(sc->res[0], reg, val)
 
 
-#define CPSW_BASE	0x4a102000	// FIXME
+#define CPSW_BASE	0x4a100000	// FIXME
 
 #define cpsw_cpdma_txbd_offset(i)	\
 	(CPSW_CPPI_RAM_OFFSET + ((i)*16))
