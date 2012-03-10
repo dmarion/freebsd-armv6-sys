@@ -614,10 +614,9 @@ static void
 cpsw_start(struct ifnet *ifp)
 {
 	struct cpsw_softc *sc = ifp->if_softc;
+
 	CPSW_TX_LOCK(sc);
-
 	cpsw_start_locked(ifp);
-
 	CPSW_TX_UNLOCK(sc);
 }
 
@@ -842,7 +841,7 @@ cpsw_tick(void *msc)
 	struct cpsw_softc *sc = msc;
 
 	/* Check for TX timeout */
-	//cpsw_watchdog(sc);
+	//cpsw_watchdog(sc); FIXME
 
 	mii_tick(sc->mii);
 
@@ -873,13 +872,9 @@ cpsw_init_locked(void *arg)
 	struct cpsw_softc *sc = arg;
 	struct cpsw_cpdma_bd bd;
 	uint32_t i;
-#if 0
-	uint32_t p1[0x2000];
-	uint32_t p2[256];
-	uint32_t p3[256];
-	uint32_t x;
-#endif
+
 	printf("%s: start\n",__func__);
+
 	/* Reset SS */
 	cpsw_write_4(CPSW_SS_SOFT_RESET, 1);
 	while(cpsw_read_4(CPSW_SS_SOFT_RESET) & 1);
@@ -895,6 +890,9 @@ cpsw_init_locked(void *arg)
 		cpsw_write_4(CPSW_CPDMA_RX_CP(i), 0);
 		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(i), 0);
         }
+
+	/* Set CPDMA TX priority to fixed */
+	cpsw_write_4(CPSW_CPDMA_DMACONTROL, 1);
 
 	/* Reset writer */
 	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
@@ -912,6 +910,16 @@ cpsw_init_locked(void *arg)
 	while(cpsw_read_4(CPSW_SL_SOFT_RESET(0)) & 1);
 	cpsw_write_4(CPSW_SL_SOFT_RESET(1), 1);
 	while(cpsw_read_4(CPSW_SL_SOFT_RESET(1)) & 1);
+
+	/* Set Host Port Mapping */
+	cpsw_write_4(CPSW_PORT_P0_CPDMA_TX_PRI_MAP, 0x76543210);
+	cpsw_write_4(CPSW_PORT_P0_CPDMA_RX_CH_MAP, 0);
+
+	/* Set Slave Mapping */
+	cpsw_write_4(CPSW_SL_RX_PRI_MAP(0),0x76543210);
+	cpsw_write_4(CPSW_SL_RX_PRI_MAP(1),0x76543210);
+	cpsw_write_4(CPSW_PORT_P_TX_PRI_MAP(0),0x33221100);
+	cpsw_write_4(CPSW_PORT_P_TX_PRI_MAP(1),0x33221100);
 
 	/* Set MAC Address */
 	cpsw_write_4(CPSW_PORT_P1_SA_HI,sc->mac_addr[0] |
@@ -948,33 +956,37 @@ cpsw_init_locked(void *arg)
 	/* Write channel 0 RX HDP */
 	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
 
+	/* Clear all interrupt Masks */
+	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_CLEAR, 0xFFFFFFFF);
+	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_CLEAR, 0xFFFFFFFF);
 
 	/* Enable TX & RX DMA */
 	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
 	cpsw_write_4(CPSW_CPDMA_RX_CONTROL, 1);
 
-	/* Clear all interrupt Masks */
-	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_CLEAR, 0xFFFFFFFF);
-	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_CLEAR, 0xFFFFFFFF);
+	/* Enable TX and RX interrupt receive for core 0 */
+	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0xFF);
+	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0xFF);
 
-	/* Ack stalled irqs */
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 0);
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 3);
+	/* enable host Error Interrupt */
+	cpsw_write_4(CPSW_CPDMA_DMA_INTMASK_SET, 2);
 
 	/* Enable interrupts for TX and RX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
 	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_SET, 1);
 
-	/* Enable TX and RX interrupt receive for core 0 */
-	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0xFF);
-	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0xFF);
 	//cpsw_write_4(CPSW_WR_C_MISC_EN(0), 0xFF);
 
+	/* Ack stalled irqs */
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 0);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 
 #if 0
-
+	uint32_t p1[0x2000];
+	uint32_t p2[256];
+	uint32_t p3[256];
+	uint32_t x;
 
 	for(i=0;i<0xFF;i+=4) {
 		p1[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + i);
