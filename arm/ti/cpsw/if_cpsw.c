@@ -875,9 +875,40 @@ cpsw_init_locked(void *arg)
 
 	printf("%s: start\n",__func__);
 
+	/* Disable TX and RX interrupt receive for core 0 */
+	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0);
+	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0);
+
 	/* Reset SS */
 	cpsw_write_4(CPSW_SS_SOFT_RESET, 1);
 	while(cpsw_read_4(CPSW_SS_SOFT_RESET) & 1);
+
+	/* Set Host Port Mapping */
+	cpsw_write_4(CPSW_PORT_P0_CPDMA_TX_PRI_MAP, 0x76543210);
+	cpsw_write_4(CPSW_PORT_P0_CPDMA_RX_CH_MAP, 0);
+
+	/* Reset and init Sliver port 1 and 2 */
+	for(i=0;i<2;i++) {
+		/* Reset */
+		cpsw_write_4(CPSW_SL_SOFT_RESET(i), 1);
+		while(cpsw_read_4(CPSW_SL_SOFT_RESET(i)) & 1);
+		/* Set Slave Mapping */
+		cpsw_write_4(CPSW_SL_RX_PRI_MAP(i),0x76543210);
+		cpsw_write_4(CPSW_PORT_P_TX_PRI_MAP(i+1),0x33221100);
+		cpsw_write_4(CPSW_SL_RX_MAXLEN(i),0x5f2);
+		/* Set MAC Address */
+		cpsw_write_4(CPSW_PORT_P_SA_HI(i+1), sc->mac_addr[0] |
+			(sc->mac_addr[1] <<  8) |
+			(sc->mac_addr[2] << 16) |
+			(sc->mac_addr[3] << 24));
+		cpsw_write_4(CPSW_PORT_P_SA_LO(i+1), sc->mac_addr[4] |
+			(sc->mac_addr[5] <<  8));
+	}
+
+	cpsw_write_4(CPSW_SS_PTYPE, 0);
+
+	/* Enable statistics for ports 0, 1 and 2 */
+	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
 
 	/* Reset DMA */
 	cpsw_write_4(CPSW_CPDMA_SOFT_RESET, 1);
@@ -888,54 +919,19 @@ cpsw_init_locked(void *arg)
 		cpsw_write_4(CPSW_CPDMA_RX_HDP(i), 0);
 		cpsw_write_4(CPSW_CPDMA_TX_CP(i), 0);
 		cpsw_write_4(CPSW_CPDMA_RX_CP(i), 0);
-		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(i), 0);
         }
 
-	/* Set CPDMA TX priority to fixed */
-	cpsw_write_4(CPSW_CPDMA_DMACONTROL, 1);
+	/* Clear all interrupt Masks */
+	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_CLEAR, 0xFFFFFFFF);
+	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_CLEAR, 0xFFFFFFFF);
 
-	/* Reset writer */
-	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
-	while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
+	/* Enable TX & RX DMA */
+	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
+	cpsw_write_4(CPSW_CPDMA_RX_CONTROL, 1);
 
-	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
-	/* TODO Calculate MDCLK=CLK/(CLKDIV+1) */
-	cpsw_write_4(MDIOCONTROL, (1<<30) | (1<<18) | 0xFF);
-
-	/* Enable statistics for ports 0, 1 and 2 */
-	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
-
-	/* Reset Sliver port 0 and 1 */
-	cpsw_write_4(CPSW_SL_SOFT_RESET(0), 1);
-	while(cpsw_read_4(CPSW_SL_SOFT_RESET(0)) & 1);
-	cpsw_write_4(CPSW_SL_SOFT_RESET(1), 1);
-	while(cpsw_read_4(CPSW_SL_SOFT_RESET(1)) & 1);
-
-	/* Set Host Port Mapping */
-	cpsw_write_4(CPSW_PORT_P0_CPDMA_TX_PRI_MAP, 0x76543210);
-	cpsw_write_4(CPSW_PORT_P0_CPDMA_RX_CH_MAP, 0);
-
-	/* Set Slave Mapping */
-	cpsw_write_4(CPSW_SL_RX_PRI_MAP(0),0x76543210);
-	cpsw_write_4(CPSW_SL_RX_PRI_MAP(1),0x76543210);
-	cpsw_write_4(CPSW_PORT_P_TX_PRI_MAP(0),0x33221100);
-	cpsw_write_4(CPSW_PORT_P_TX_PRI_MAP(1),0x33221100);
-
-	/* Set MAC Address */
-	cpsw_write_4(CPSW_PORT_P1_SA_HI,sc->mac_addr[0] |
-		(sc->mac_addr[1] <<  8) |
-		(sc->mac_addr[2] << 16) |
-		(sc->mac_addr[3] << 24));
-	cpsw_write_4(CPSW_PORT_P1_SA_LO,sc->mac_addr[4] |
-		(sc->mac_addr[5] <<  8));
-
-        /* Select MII in GMII_SEL, Internal Delay mode */
-	ti_scm_reg_write_4(0x650, 0);
-
-	/* Set MACCONTROL for ports 0,1: FULLDUPLEX(1), GMII_EN(5),
-	   IFCTL_A(15), IFCTL_B(16) FIXME */
-	cpsw_write_4(CPSW_SL_MACCONTROL(0), 1 | (1<<5) | (1<<15));
-	cpsw_write_4(CPSW_SL_MACCONTROL(1), 1 | (1<<5) | (1<<15));
+	/* Enable interrupts for TX and RX Channel 0 */
+	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
+	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_SET, 1);
 
 	/* Initialize RX Buffer Descriptors */
 	i = CPSW_MAX_RX_BUFFERS;
@@ -956,31 +952,45 @@ cpsw_init_locked(void *arg)
 	/* Write channel 0 RX HDP */
 	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
 
-	/* Clear all interrupt Masks */
-	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_CLEAR, 0xFFFFFFFF);
-	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_CLEAR, 0xFFFFFFFF);
-
-	/* Enable TX & RX DMA */
-	cpsw_write_4(CPSW_CPDMA_TX_CONTROL, 1);
-	cpsw_write_4(CPSW_CPDMA_RX_CONTROL, 1);
-
 	/* Enable TX and RX interrupt receive for core 0 */
 	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0xFF);
 	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0xFF);
 
-	/* enable host Error Interrupt */
+	/* Enable host Error Interrupt */
 	cpsw_write_4(CPSW_CPDMA_DMA_INTMASK_SET, 2);
 
 	/* Enable interrupts for TX and RX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
 	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_SET, 1);
 
-	//cpsw_write_4(CPSW_WR_C_MISC_EN(0), 0xFF);
-
 	/* Ack stalled irqs */
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 0);
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
+
+	/* Set CPDMA TX priority to fixed */
+	//cpsw_write_4(CPSW_CPDMA_DMACONTROL, 1);
+
+	/* Reset writer */
+	//cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
+	//while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
+
+	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
+	/* TODO Calculate MDCLK=CLK/(CLKDIV+1) */
+	cpsw_write_4(MDIOCONTROL, (1<<30) | (1<<18) | 0xFF);
+
+        /* Select MII in GMII_SEL, Internal Delay mode */
+	ti_scm_reg_write_4(0x650, 0);
+
+	/* Set MACCONTROL for ports 0,1: FULLDUPLEX(1), GMII_EN(5),
+	   IFCTL_A(15), IFCTL_B(16) FIXME */
+	cpsw_write_4(CPSW_SL_MACCONTROL(0), 1 | (1<<5) | (1<<15));
+	//cpsw_write_4(CPSW_SL_MACCONTROL(1), 1 | (1<<5) | (1<<15));
+
+	//cpsw_write_4(CPSW_WR_C_MISC_EN(0), 0xFF);
+
+	printf("%s: CPSW_WR_INT_CONTROL=%x\n", cpsw_read_4(CPSW_WR_INT_CONTROL));
+
 
 #if 0
 	uint32_t p1[0x2000];
