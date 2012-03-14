@@ -151,12 +151,7 @@
 
 		musb@47400000 {
 			compatible = "ti,am335x-musbhsfc";
-			reg = < 0x47400000 0x1000	/* Subsystem Regs */
-				0x47401000 0x0800	/* USB0 PHY and core */
-				0x47401800 0x0800	/* USB1 PHY and core */
-				0x47402000 0x1000	/* CPPI DMA Ctrl Regs */
-				0x47403000 0x1000	/* CPPI DMA Sched Regs */
-				0x47404000 0x1000 >;	/* USB Queue Mgr Regs */
+			reg = < 0x47400000 0x5000 >;
 			interrupts = <  17		/* USBSSINT */
 					18		/* USBINT0 */
 					19		/* USBINT1 */
