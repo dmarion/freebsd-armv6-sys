@@ -14,7 +14,6 @@ dump_packet(char *pa, unsigned int len)
  *  Early Print
  */
 
-#define DEBUGBUF_SIZE 256
 #define LSR_THRE    0x20        /* Xmit holding register empty */
 #if defined(SOC_TI_AM335X)
 #define EARLY_UART_VA_BASE      0xE4E09000
@@ -25,7 +24,7 @@ dump_packet(char *pa, unsigned int len)
 #else
 #error "Unknown SoC"
 #endif
-char debugbuf[DEBUGBUF_SIZE];
+
 
 static __inline void
 early_putc(unsigned char c)
