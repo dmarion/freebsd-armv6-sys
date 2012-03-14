@@ -7,3 +7,6 @@ arm/ti/am335x/am335x_scm_padconf.c	standard
 
 arm/ti/cpsw/if_cpsw.c			standard
 arm/ti/cpsw/if_cpsw_ale.c		standard
+
+arm/ti/musb/musbhsfc_am335x.c		optional	usb musbhsfc
+
