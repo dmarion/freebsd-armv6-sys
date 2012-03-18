@@ -797,19 +797,11 @@ static void
 cpsw_intr_tx(void *arg)
 {
 	struct cpsw_softc *sc = arg;
-	printf("%s: unimplemented\n",__func__);
 	printf("%s: CPSW_CPDMA_TX_CP(0) = %x\n", __func__, cpsw_read_4(CPSW_CPDMA_TX_CP(0)));
 	printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
 	printf("%s: CPSW_CPDMA_DMASTATUS = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
-	printf("%s: CPSW_CPDMA_TX_INTSTAT_RAW = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTSTAT_RAW));
-	printf("%s: CPSW_CPDMA_TX_INTSTAT_MASKED = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTSTAT_MASKED));
-	printf("%s: CPSW_CPDMA_TX_INTMASK_SET = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTMASK_SET));
-	printf("%s: CPSW_CPDMA_TX_INTMASK_CLEAR = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTMASK_CLEAR));
-	printf("%s: CPSW_WR_C0_RX_EN = 0x%x\n",__func__,	cpsw_read_4(CPSW_WR_OFFSET + 0x14));
-	printf("%s: CPSW_WR_C0_TX_EN = 0x%x\n",__func__,	cpsw_read_4(CPSW_WR_OFFSET + 0x18));
-	printf("%s: CPSW_WR_C0_TX_STAT = 0x%x\n", __func__, cpsw_read_4(CPSW_WR_C_TX_STAT(0)));
-	printf("%s: CPSW_WR_C0_RX_STAT = 0x%x\n", __func__, cpsw_read_4(CPSW_WR_C_RX_STAT(0)));
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
+	cpsw_write_4(CPSW_CPDMA_TX_CP(0), cpsw_cpdma_txbd_paddr(0));
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
 }
 
 static void
@@ -874,7 +866,7 @@ cpsw_init_locked(void *arg)
 	uint32_t i;
 
 	printf("%s: start\n",__func__);
-
+#if 0
 	/* Disable TX and RX interrupt receive for core 0 */
 	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0);
 	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0);
@@ -894,7 +886,7 @@ cpsw_init_locked(void *arg)
 		while(cpsw_read_4(CPSW_SL_SOFT_RESET(i)) & 1);
 		/* Set Slave Mapping */
 		cpsw_write_4(CPSW_SL_RX_PRI_MAP(i),0x76543210);
-		cpsw_write_4(CPSW_PORT_P_TX_PRI_MAP(i+1),0x33221100);
+		cpsw_write_4(CPSW_PORT_P_TX_PRI_MAP(i+1),0x33221001);
 		cpsw_write_4(CPSW_SL_RX_MAXLEN(i),0x5f2);
 		/* Set MAC Address */
 		cpsw_write_4(CPSW_PORT_P_SA_HI(i+1), sc->mac_addr[0] |
@@ -909,10 +901,12 @@ cpsw_init_locked(void *arg)
 
 	/* Enable statistics for ports 0, 1 and 2 */
 	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
-
+#endif
 	/* Reset DMA */
-	cpsw_write_4(CPSW_CPDMA_SOFT_RESET, 1);
-	while(cpsw_read_4(CPSW_CPDMA_SOFT_RESET) & 1);
+	//cpsw_write_4(CPSW_CPDMA_SOFT_RESET, 1);
+	//while(cpsw_read_4(CPSW_CPDMA_SOFT_RESET) & 1);
+
+	//DELAY(100000);
 
         for(i = 0; i < 8; i++) {
 		cpsw_write_4(CPSW_CPDMA_TX_HDP(i), 0);
@@ -968,66 +962,23 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 
-	/* Set CPDMA TX priority to fixed */
-	//cpsw_write_4(CPSW_CPDMA_DMACONTROL, 1);
-
 	/* Reset writer */
-	//cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
-	//while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
+	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
+	while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
 
 	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
 	/* TODO Calculate MDCLK=CLK/(CLKDIV+1) */
 	cpsw_write_4(MDIOCONTROL, (1<<30) | (1<<18) | 0xFF);
 
         /* Select MII in GMII_SEL, Internal Delay mode */
-	ti_scm_reg_write_4(0x650, 0);
+	//ti_scm_reg_write_4(0x650, 0);
 
 	/* Set MACCONTROL for ports 0,1: FULLDUPLEX(1), GMII_EN(5),
 	   IFCTL_A(15), IFCTL_B(16) FIXME */
-	cpsw_write_4(CPSW_SL_MACCONTROL(0), 1 | (1<<5) | (1<<15));
+	//cpsw_write_4(CPSW_SL_MACCONTROL(0), 1 | (1<<5) | (1<<15));
 	//cpsw_write_4(CPSW_SL_MACCONTROL(1), 1 | (1<<5) | (1<<15));
 
 	//cpsw_write_4(CPSW_WR_C_MISC_EN(0), 0xFF);
-
-	printf("%s: CPSW_WR_INT_CONTROL=%x\n", cpsw_read_4(CPSW_WR_INT_CONTROL));
-
-
-#if 0
-	uint32_t p1[0x2000];
-	uint32_t p2[256];
-	uint32_t p3[256];
-	uint32_t x;
-
-	for(i=0;i<0xFF;i+=4) {
-		p1[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + i);
-		p2[i] = cpsw_read_4(CPSW_CPDMA_OFFSET + 0x200 + i);
-		p3[i] = cpsw_read_4(CPSW_WR_OFFSET + i);
-	}
-
-#define START	0x1000
-#define STOP	0x1100
-
-	for(i=START;i<STOP;i+=4) {
-		x = cpsw_read_4(i);
-//		if(x)	printf("0x%04x = 0x%08x\n", i,x);
-		p1[i] = x;
-	}
-	printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
-
-	//cpsw_ale_dump_table(sc);
-	ti_scm_reg_read_4(0x630,&x); printf("630 %x\n", x);
-	ti_scm_reg_read_4(0x634,&x); printf("634 %x\n", x);
-	ti_scm_reg_read_4(0x638,&x); printf("638 %x\n", x);
-	ti_scm_reg_read_4(0x63c,&x); printf("63c %x\n", x);
-
-	for(i=START;i<STOP;i+=4) {
-		x = cpsw_read_4(i);
-		if (p1[i]  != x)
-			printf("0x%04x = 0x%08x -> 0x%08x\n", i,p1[i],x);
-		else if(x)
-			printf("0x%04x = 0x%08x\n", i,x);
-	}
-#endif
 
 	/* Activate network interface */
 	sc->ifp->if_drv_flags |= IFF_DRV_RUNNING;
