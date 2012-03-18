@@ -104,6 +104,7 @@ static int cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map,
 
 static void cpsw_intr_rx_thresh(void *arg);
 static void cpsw_intr_rx(void *arg);
+static void cpsw_intr_rx_locked(void *arg);
 static void cpsw_intr_tx(void *arg);
 static void cpsw_intr_misc(void *arg);
 
@@ -121,7 +122,6 @@ static device_method_t cpsw_methods[] = {
 	DEVMETHOD(miibus_writereg,	cpsw_miibus_writereg),
 	{ 0, 0 }
 };
-
 
 static driver_t cpsw_driver = {
 	"cpsw",
@@ -157,15 +157,23 @@ static struct {
 };
 
 
-#define DUMP_RXBD(p) cpsw_cpdma_read_rxbd(p, &bd);					\
-	printf("%s: RXBD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "		\
-	"buflen=0x%04x pktlen=0x%04x flags=0x%04x\n", __func__, p,	\
-	bd.next, bd.bufptr, bd.bufoff,bd.buflen, bd.pktlen, bd.flags)
+#define DUMP_RXBD(p)  do {							\
+		struct cpsw_cpdma_bd mybd;					\
+		cpsw_cpdma_read_rxbd(p, &mybd);					\
+		printf("%s: RXBD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "	\
+			"buflen=0x%04x pktlen=0x%04x flags=0x%04x\n",__func__,	\
+			p, (uint32_t) mybd.next, mybd.bufptr, mybd.bufoff,	\
+			mybd.buflen, mybd.pktlen, mybd.flags);			\
+	} while(0)
 
-#define DUMP_TXBD(p) cpsw_cpdma_read_txbd(p, &bd);					\
-	printf("%s: TXBD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "		\
-	"buflen=0x%04x pktlen=0x%04x flags=0x%04x\n", __func__, p,	\
-	bd.next, bd.bufptr, bd.bufoff,bd.buflen, bd.pktlen, bd.flags)
+#define DUMP_TXBD(p) do {							\
+		struct cpsw_cpdma_bd mybd;					\
+		cpsw_cpdma_read_txbd(p, &mybd);					\
+		printf("%s: TXBD[%3u] next=0x%08x bufptr=0x%08x bufoff=0x%04x "	\
+			"buflen=0x%04x pktlen=0x%04x flags=0x%04x\n", __func__,	\
+			p, (uint32_t) mybd.next, mybd.bufptr, mybd.bufoff,	\
+			mybd.buflen, mybd.pktlen, mybd.flags);			\
+	} while(0)
 
 
 /* Locking macros */
@@ -222,6 +230,7 @@ cpsw_attach(device_t dev)
 	struct cpsw_softc *sc;
 	struct mii_softc *miisc;
 	struct ifnet *ifp;
+	/* FIXME - take it from eFuse */
 	uint8_t mac_addr[ETHER_ADDR_LEN] = {0xd4,0x94,0xa1,0x38,0xb9,0x13};
 	int i, error, phy;
 	uint32_t reg;
@@ -599,6 +608,7 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 			(uint32_t) segs[seg].ds_addr);
 		bd.next = NULL;
 		bd.bufptr = segs[seg].ds_addr;
+		bd.bufoff = 0;
 		bd.buflen = segs[seg].ds_len;
 		bd.pktlen = segs[seg].ds_len;
 		/*Set OWNERSHIP, SOP, EOP */
@@ -626,8 +636,6 @@ cpsw_start_locked(struct ifnet *ifp)
 	struct cpsw_softc *sc = ifp->if_softc;
 	struct mbuf *m0, *mtmp;
 	uint32_t queued = 0;
-
-	printf("%s: start\n",__func__);
 
 	CPSW_TX_LOCK_ASSERT(sc);
 
@@ -659,7 +667,9 @@ cpsw_start_locked(struct ifnet *ifp)
 		cpsw_write_4(CPSW_CPDMA_TX_HDP(0), cpsw_cpdma_txbd_paddr(0));
 		printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
 		printf("%s: CPSW_CPDMA_DMASTATUS = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
-		//DUMP_TXBD(0);
+		printf("%s: CPSW_CPDMA_RX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_RX_HDP(0)));
+		printf("%s: CPSW_CPDMA_RX_CP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_RX_CP(0)));
+		DUMP_TXBD(0);
 		//sc->wd_timer = 5;
 	}
 	printf("%s: done\n",__func__);
@@ -780,8 +790,59 @@ cpsw_intr_rx_thresh(void *arg)
 static void
 cpsw_intr_rx(void *arg)
 {
-	//struct cpsw_softc *sc = arg;
-	printf("%s: unimplemented\n",__func__);
+	struct cpsw_softc *sc = arg;
+	CPSW_RX_LOCK(sc);
+	cpsw_intr_rx_locked(arg);
+	CPSW_RX_UNLOCK(sc);
+}
+
+static void
+cpsw_intr_rx_locked(void *arg)
+{
+	struct cpsw_softc *sc = arg;
+	struct cpsw_cpdma_bd bd;
+	struct ifnet *ifp;
+	int i;
+	
+	ifp = sc->ifp;
+	
+	i = sc->rxbd_head;
+	cpsw_cpdma_read_rxbd(i, &bd);
+	while (bd.flags & CPDMA_BD_SOP) {
+		DUMP_RXBD(i);
+		cpsw_write_4(CPSW_CPDMA_RX_CP(0), cpsw_cpdma_rxbd_paddr(i));
+
+		bus_dmamap_sync(sc->mbuf_dtag, sc->rx_dmamap[i], BUS_DMASYNC_POSTREAD);
+
+		printf("================\n");
+		dump_packet(sc->rx_mbuf[i]->m_hdr.mh_data, bd.pktlen);
+		printf("vaddr=%x\n", sc->rx_mbuf[i]->m_hdr.mh_data);
+		printf("================\n");
+
+		/* Fill mbuf */
+		sc->rx_mbuf[i]->m_hdr.mh_data +=2;
+		sc->rx_mbuf[i]->m_len = bd.pktlen-2;
+		sc->rx_mbuf[i]->m_pkthdr.len = bd.pktlen-2;
+		sc->rx_mbuf[i]->m_flags |= M_PKTHDR;
+		sc->rx_mbuf[i]->m_pkthdr.rcvif = ifp;
+
+		/* Handover packet */
+		CPSW_RX_UNLOCK(sc);
+		(*ifp->if_input)(ifp, sc->rx_mbuf[i]);
+		CPSW_RX_LOCK(sc);
+		
+		/* check if last descriptor */
+		if (i == sc->rxbd_tail)
+			break;
+
+		/* read next descriptor */
+		cpsw_cpdma_read_rxbd(++i, &bd);
+	}
+
+	printf("%s: CPSW_CPDMA_RX_CP(0) = %x\n", __func__, cpsw_read_4(CPSW_CPDMA_RX_CP(0)));
+	printf("%s: CPSW_CPDMA_RX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_RX_HDP(0)));
+	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_read_4(CPSW_CPDMA_RX_CP(0)));
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
 }
 
 static void
@@ -792,15 +853,17 @@ cpsw_intr_tx(void *arg)
 	printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
 	printf("%s: CPSW_CPDMA_DMASTATUS = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
 	cpsw_write_4(CPSW_CPDMA_TX_CP(0), cpsw_cpdma_txbd_paddr(0));
-	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
+	DUMP_TXBD(0);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 }
 
 static void
 cpsw_intr_misc(void *arg)
 {
 	struct cpsw_softc *sc = arg;
+	uint32_t stat = cpsw_read_4(CPSW_WR_C_MISC_STAT(0));
+	printf("%s: stat=%x\n",__func__,stat);
 	/* EOI_RX_PULSE */
-	printf("%s: misc_stat=%x\n", __func__, cpsw_read_4(CPSW_WR_C_MISC_STAT(0)));
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 3);
 }
 
@@ -849,18 +912,25 @@ cpsw_init(void *arg)
 	CPSW_GLOBAL_UNLOCK(sc);
 }
 
+int already_init=0;
+
 static void
 cpsw_init_locked(void *arg)
 {
 	struct cpsw_softc *sc = arg;
 	struct cpsw_cpdma_bd bd;
-	uint32_t i;
+	uint32_t i,a,r;
 
 	printf("%s: start\n",__func__);
 
-	/* Disable TX and RX interrupt receive for core 0 */
-	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0);
-	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0);
+	if (already_init)
+		goto init_end;
+
+	already_init=1;
+
+	/* Reset writer */
+	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
+	while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
 
 #if 0
 	/* Reset SS */
@@ -895,8 +965,8 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_SS_STAT_PORT_EN, 7);
 #endif
 	/* Reset DMA */
-	//cpsw_write_4(CPSW_CPDMA_SOFT_RESET, 1);
-	//while(cpsw_read_4(CPSW_CPDMA_SOFT_RESET) & 1);
+	cpsw_write_4(CPSW_CPDMA_SOFT_RESET, 1);
+	while(cpsw_read_4(CPSW_CPDMA_SOFT_RESET) & 1);
 
 	//DELAY(100000);
 
@@ -919,31 +989,40 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
 	cpsw_write_4(CPSW_CPDMA_RX_INTMASK_SET, 1);
 
+	cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 0);
+
 	/* Initialize RX Buffer Descriptors */
 	i = CPSW_MAX_RX_BUFFERS;
 	bd.next = NULL;
 	while (i--) {
-		bd.buflen = MCLBYTES;
+		bd.buflen = MCLBYTES-1;
+		bd.bufoff = 2; /* make IP hdr aligned with 4 */
 		bd.pktlen = 0;
-		bd.flags = (1<<13);
+		bd.flags = CPDMA_BD_OWNER;
 		cpsw_new_rxbuf(sc->mbuf_dtag, sc->rx_dmamap[i],
 			&sc->rx_mbuf[i], (bus_addr_t *) &bd.bufptr);
 		cpsw_cpdma_write_rxbd(i, &bd);
 		/* Increment number of free RX buffers */
-		cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 1);
-		//DUMP_RXBD(i);
+		//cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 1);
+		DUMP_RXBD(i);
 		bd.next = (struct cpsw_cpdma_bd *) cpsw_cpdma_rxbd_paddr(i);
 	}
 
+	sc->rxbd_head = 0;
+	sc->rxbd_tail = CPSW_MAX_RX_BUFFERS;
+
+	/* Make IP hdr aligned with 4 */
+	cpsw_write_4(CPSW_CPDMA_RX_BUFFER_OFFSET, 2);
 	/* Write channel 0 RX HDP */
 	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_cpdma_rxbd_paddr(0));
 
 	/* Enable TX and RX interrupt receive for core 0 */
 	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0xFF);
 	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0xFF);
+	cpsw_write_4(CPSW_WR_C_MISC_EN(0), 0x3F);
 
 	/* Enable host Error Interrupt */
-	cpsw_write_4(CPSW_CPDMA_DMA_INTMASK_SET, 2);
+	cpsw_write_4(CPSW_CPDMA_DMA_INTMASK_SET, 1);
 
 	/* Enable interrupts for TX and RX Channel 0 */
 	cpsw_write_4(CPSW_CPDMA_TX_INTMASK_SET, 1);
@@ -953,10 +1032,8 @@ cpsw_init_locked(void *arg)
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 0);
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
+	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 3);
 
-	/* Reset writer */
-	cpsw_write_4(CPSW_WR_SOFT_RESET, 1);
-	while(cpsw_read_4(CPSW_WR_SOFT_RESET) & 1);
 
 	/* Initialze MDIO - ENABLE, PREAMBLE=0, FAULTENB, CLKDIV=0xFF */
 	/* TODO Calculate MDCLK=CLK/(CLKDIV+1) */
@@ -971,6 +1048,8 @@ cpsw_init_locked(void *arg)
 	//cpsw_write_4(CPSW_SL_MACCONTROL(1), 1 | (1<<5) | (1<<15));
 
 	//cpsw_write_4(CPSW_WR_C_MISC_EN(0), 0xFF);
+
+init_end:
 
 	/* Activate network interface */
 	sc->ifp->if_drv_flags |= IFF_DRV_RUNNING;
