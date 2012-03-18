@@ -116,7 +116,7 @@ device		usb
 options		USB_DEBUG
 #options	USB_REQ_DEBUG
 #options	USB_VERBOSE
-device		musbhsfc
+device		musb
 device		umass
 device		scbus		# SCSI bus (required for SCSI)
 device		da		# Direct Access (disks)

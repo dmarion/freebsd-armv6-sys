@@ -75,16 +75,27 @@ __FBSDID("$FreeBSD$");
 #include <dev/usb/controller/ehci.h>
 #include <dev/usb/controller/ehcireg.h>
 
-
-
-#include <arm/ti/ti_scm.h>
+#include <arm/ti/ti_prcm.h>
 
 #include <arm/debug.h> //FIXME
 
+#define USBSS_OFFSET			0
+#define USBSS_REVREG			(USBSS_OFFSET + 0x000)
+
+#define USB_CTRL_OFFSET(p)		(0x1000 + (p * 0x800))
+#define USB_REV(p)			(USB_CTRL_OFFSET(p) + 0x000)
+#define USB_CTRL(p)			(USB_CTRL_OFFSET(p) + 0x014)
+#define USB_STAT(p)			(USB_CTRL_OFFSET(p) + 0x018)
+
 #define NUM_MEM_RESOURCES 5
 #define NUM_IRQ_RES 4
- 
-struct musbhsfc_am335x_softc {
+
+#define	musb_read_4(reg)		\
+	bus_space_read_4(sc->bst, sc->bsh, reg)
+#define	musb_write_4(reg, val)	\
+	bus_space_write_4(sc->bst, sc->bsh, reg, val)
+
+struct musb_otg_am335x_softc {
 	struct resource *	mem_res;
 	struct resource *	irq_res[NUM_IRQ_RES];
 	bus_space_tag_t		bst;
@@ -92,14 +103,14 @@ struct musbhsfc_am335x_softc {
 	struct usb_bus sc_bus;
 };
 
-typedef struct musbhsfc_am335x_softc musbhsfc_am335x_softc_t;
+typedef struct musb_otg_am335x_softc musb_otg_am335x_softc_t;
 
-static struct resource_spec musbhsfc_am335x_mem_spec[] = {
+static struct resource_spec musb_otg_am335x_mem_spec[] = {
 	{ SYS_RES_MEMORY,   0,  RF_ACTIVE },
 	{ -1,               0,  0 }
 };
 
-static struct resource_spec musbhsfc_am335x_irq_spec[] = {
+static struct resource_spec musb_otg_am335x_irq_spec[] = {
 	{ SYS_RES_IRQ,      0,  RF_ACTIVE },
 	{ SYS_RES_IRQ,      1,  RF_ACTIVE },
 	{ SYS_RES_IRQ,      2,  RF_ACTIVE },
@@ -107,15 +118,15 @@ static struct resource_spec musbhsfc_am335x_irq_spec[] = {
 	{ -1,               0,  0 }
 };
 
-static int musbhsfc_am335x_probe(device_t self);
-static int musbhsfc_am335x_attach(device_t self);
-static int musbhsfc_am335x_detach(device_t self);
+static int musb_otg_am335x_probe(device_t self);
+static int musb_otg_am335x_attach(device_t self);
+static int musb_otg_am335x_detach(device_t self);
 
 static device_method_t musbhsfc_methods[] = {
 	/* Device interface */
-	DEVMETHOD(device_probe, musbhsfc_am335x_probe),
-	DEVMETHOD(device_attach, musbhsfc_am335x_attach),
-	DEVMETHOD(device_detach, musbhsfc_am335x_detach),
+	DEVMETHOD(device_probe, musb_otg_am335x_probe),
+	DEVMETHOD(device_attach, musb_otg_am335x_attach),
+	DEVMETHOD(device_detach, musb_otg_am335x_detach),
 	DEVMETHOD(device_suspend, bus_generic_suspend),
 	DEVMETHOD(device_resume, bus_generic_resume),
 	DEVMETHOD(device_shutdown, bus_generic_shutdown),
@@ -125,7 +136,7 @@ static device_method_t musbhsfc_methods[] = {
 static driver_t musbhsfc_driver = {
 	"musbhsfc",
 	musbhsfc_methods,
-	sizeof(musbhsfc_am335x_softc_t),
+	sizeof(musb_otg_am335x_softc_t),
 };
 
 static devclass_t musbhsfc_devclass;
@@ -135,7 +146,7 @@ MODULE_DEPEND(musbhsfc, usb, 1, 1, 1);
 
 
 static int
-musbhsfc_am335x_probe(device_t self)
+musb_otg_am335x_probe(device_t self)
 {
 
 	if (!ofw_bus_is_compatible(self, "ti,am335x-musbhsfc"))
@@ -147,13 +158,14 @@ musbhsfc_am335x_probe(device_t self)
 }
 
 static int
-musbhsfc_am335x_attach(device_t self)
+musb_otg_am335x_attach(device_t self)
 {
-	musbhsfc_am335x_softc_t *sc = device_get_softc(self);
+	musb_otg_am335x_softc_t *sc = device_get_softc(self);
 	int err;
+	uint32_t x;
 
 	/* Request the memory resources */
-	err = bus_alloc_resources(self, musbhsfc_am335x_mem_spec,
+	err = bus_alloc_resources(self, musb_otg_am335x_mem_spec,
 		&sc->mem_res);
 	if (err) {
 		device_printf(self, "Error: could not allocate mem resources\n");
@@ -163,12 +175,23 @@ musbhsfc_am335x_attach(device_t self)
 	sc->bsh = rman_get_bushandle(sc->mem_res);
 
 	/* Request the IRQ resources */
-	err = bus_alloc_resources(self, musbhsfc_am335x_irq_spec,
+	err = bus_alloc_resources(self, musb_otg_am335x_irq_spec,
 		sc->irq_res);
 	if (err) {
 		device_printf(self, "Error: could not allocate irq resources\n");
 		return (ENXIO);
 	}
+
+	/* Configure source and enable */
+	err = ti_prcm_clk_enable(MUSB0_CLK);
+	if (err) {
+		device_printf(self, "Error: could not setup timer clock\n");
+		return (ENXIO);
+	}
+
+
+	x = musb_read_4(USBSS_REVREG);
+	device_printf(self, "Revision %u.%u\n",(x >> 8) & 0x7, x & 0x3F);
 
 	sc->sc_bus.bdev = device_add_child(self, "usbus", -1);
 	if (!sc->sc_bus.bdev) {
@@ -180,13 +203,13 @@ musbhsfc_am335x_attach(device_t self)
 
 	return (0);
 error:
-	musbhsfc_am335x_detach(self);
+	musb_otg_am335x_detach(self);
 	return (ENXIO);
 }
 
 static int
-musbhsfc_am335x_detach(device_t self)
+musb_otg_am335x_detach(device_t self)
 {
-	//musbhsfc_am335x_softc_t *sc = device_get_softc(self);
+	//musb_otg_am335x_softc_t *sc = device_get_softc(self);
 	return (0);
 }
