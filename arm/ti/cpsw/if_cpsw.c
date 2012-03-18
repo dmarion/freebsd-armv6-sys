@@ -866,11 +866,12 @@ cpsw_init_locked(void *arg)
 	uint32_t i;
 
 	printf("%s: start\n",__func__);
-#if 0
+
 	/* Disable TX and RX interrupt receive for core 0 */
 	cpsw_write_4(CPSW_WR_C_TX_EN(0), 0);
 	cpsw_write_4(CPSW_WR_C_RX_EN(0), 0);
 
+#if 0
 	/* Reset SS */
 	cpsw_write_4(CPSW_SS_SOFT_RESET, 1);
 	while(cpsw_read_4(CPSW_SS_SOFT_RESET) & 1);
