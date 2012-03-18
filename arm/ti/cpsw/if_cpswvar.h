@@ -68,7 +68,7 @@ struct cpsw_softc {
 #define CPDMA_BD_OWNER		(1<<13)
 
 struct cpsw_cpdma_bd {
-	volatile struct cpsw_cpdma_bd *next;
+	volatile uint32_t next;
 	volatile uint32_t bufptr;
 	volatile uint16_t buflen;
 	volatile uint16_t bufoff;
@@ -77,11 +77,8 @@ struct cpsw_cpdma_bd {
 };
 
 /* Read/Write macros */
-#define cpsw_read_4(reg)		\
-	bus_read_4(sc->res[0], reg)
-#define cpsw_write_4(reg, val)		\
-	bus_write_4(sc->res[0], reg, val)
-
+#define cpsw_read_4(reg)		bus_read_4(sc->res[0], reg)
+#define cpsw_write_4(reg, val)		bus_write_4(sc->res[0], reg, val)
 
 #define CPSW_BASE	0x4a100000	// FIXME
 
@@ -93,12 +90,16 @@ struct cpsw_cpdma_bd {
 #define cpsw_cpdma_write_txbd(i, val)	\
 	bus_write_region_4(sc->res[0], cpsw_cpdma_txbd_offset(i), (uint32_t *) val, 4)
 
-#define cpsw_cpdma_rxbd_offset(i)		\
+#define cpsw_cpdma_rxbd_offset(i)	\
 	(CPSW_CPPI_RAM_OFFSET + ((CPSW_MAX_TX_BUFFERS + (i))*16))
 #define cpsw_cpdma_rxbd_paddr(i)	(cpsw_cpdma_rxbd_offset(i) + CPSW_BASE)
 #define cpsw_cpdma_read_rxbd(i, val)	\
 	bus_read_region_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), (uint32_t *) val, 4)
 #define cpsw_cpdma_write_rxbd(i, val)	\
 	bus_write_region_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), (uint32_t *) val, 4)
+
+#define cpsw_cpdma_write_rxbd_next(i, val) \
+	bus_write_4(sc->res[0], cpsw_cpdma_rxbd_offset(i), val)
+
 
 #endif /*_IF_CPSWVAR_H */

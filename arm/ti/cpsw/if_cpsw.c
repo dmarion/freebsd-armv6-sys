@@ -99,8 +99,7 @@ static void cpsw_start(struct ifnet *ifp);
 static void cpsw_start_locked(struct ifnet *ifp);
 static int cpsw_ioctl(struct ifnet *ifp, u_long command, caddr_t data);
 static int cpsw_allocate_dma(struct cpsw_softc *sc);
-static int cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map,
-    struct mbuf **mbufp, bus_addr_t *paddr);
+static int cpsw_new_rxbuf(struct cpsw_softc *sc, uint32_t i, uint32_t next);
 
 static void cpsw_intr_rx_thresh(void *arg);
 static void cpsw_intr_rx(void *arg);
@@ -542,35 +541,42 @@ cpsw_allocate_dma(struct cpsw_softc *sc)
 }
 
 static int
-cpsw_new_rxbuf(bus_dma_tag_t tag, bus_dmamap_t map, struct mbuf **mbufp,
-    bus_addr_t *paddr)
+cpsw_new_rxbuf(struct cpsw_softc *sc, uint32_t i, uint32_t next)
 {
-	struct mbuf *new_mbuf;
 	bus_dma_segment_t seg[1];
+	struct cpsw_cpdma_bd bd;
 	int error;
 	int nsegs;
 
-	KASSERT(mbufp != NULL, ("NULL mbuf pointer!"));
-
-	new_mbuf = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
-	if (new_mbuf == NULL)
-		return (ENOBUFS);
-	new_mbuf->m_len = new_mbuf->m_pkthdr.len = new_mbuf->m_ext.ext_size;
-
-	if (*mbufp) {
-		bus_dmamap_sync(tag, map, BUS_DMASYNC_POSTREAD);
-		bus_dmamap_unload(tag, map);
+	if (sc->rx_mbuf[i]) {
+		bus_dmamap_sync(sc->mbuf_dtag, sc->rx_dmamap[i], BUS_DMASYNC_POSTREAD);
+		bus_dmamap_unload(sc->mbuf_dtag, sc->rx_dmamap[i]);
 	}
 
-	error = bus_dmamap_load_mbuf_sg(tag, map, new_mbuf, seg, &nsegs,
-	    BUS_DMA_NOWAIT);
+	sc->rx_mbuf[i] = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
+	if (sc->rx_mbuf[i] == NULL)
+		return (ENOBUFS);
+
+	sc->rx_mbuf[i]->m_len = sc->rx_mbuf[i]->m_pkthdr.len = sc->rx_mbuf[i]->m_ext.ext_size;
+
+	error = bus_dmamap_load_mbuf_sg(sc->mbuf_dtag, sc->rx_dmamap[i], 
+		sc->rx_mbuf[i], seg, &nsegs, BUS_DMA_NOWAIT);
+
 	KASSERT(nsegs == 1, ("Too many segments returned!"));
 	if (nsegs != 1 || error)
 		panic("%s: nsegs(%d), error(%d)",__func__, nsegs, error);
 
-	bus_dmamap_sync(tag, map, BUS_DMASYNC_PREREAD);
-	(*mbufp) = new_mbuf;
-	(*paddr) = seg->ds_addr;
+	bus_dmamap_sync(sc->mbuf_dtag, sc->rx_dmamap[i], BUS_DMASYNC_PREREAD);
+
+	/* Create and submit new rx descriptor*/
+	bd.next = next;
+	bd.bufptr = seg->ds_addr;
+	bd.buflen = MCLBYTES-1;
+	bd.bufoff = 2; /* make IP hdr aligned with 4 */
+	bd.pktlen = 0;
+	bd.flags = CPDMA_BD_OWNER;
+	cpsw_cpdma_write_rxbd(i, &bd);
+	
 	return (0);
 }
 
@@ -584,11 +590,11 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 	int error;
 	int seg, nsegs;
 
-	printf("%s: start p=%x mh_data=%x mh_len=%x mh_type=%x mh_flags=%x\n",
-		__func__, (uint32_t) m0, (uint32_t) m0->m_hdr.mh_data,
-		m0->m_hdr.mh_len, m0->m_hdr.mh_type, m0->m_hdr.mh_flags);
+	//printf("%s: start p=%x mh_data=%x mh_len=%x mh_type=%x mh_flags=%x\n",
+	//	__func__, (uint32_t) m0, (uint32_t) m0->m_hdr.mh_data,
+	//	m0->m_hdr.mh_len, m0->m_hdr.mh_type, m0->m_hdr.mh_flags);
 
-	dump_packet(m0->m_hdr.mh_data, 128);
+	//dump_packet(m0->m_hdr.mh_data, 128);
 
 	mapp = sc->tx_dmamap[0];
 
@@ -606,7 +612,7 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 		printf("%s: seg=%u mapp=%x ds_len=%u ds_addr=%x\n", __func__,
 			seg, (uint32_t) mapp, (uint32_t) segs[seg].ds_len,
 			(uint32_t) segs[seg].ds_addr);
-		bd.next = NULL;
+		bd.next = 0;
 		bd.bufptr = segs[seg].ds_addr;
 		bd.bufoff = 0;
 		bd.buflen = segs[seg].ds_len;
@@ -616,7 +622,6 @@ cpsw_encap(struct cpsw_softc *sc, struct mbuf *m0)
 		cpsw_cpdma_write_txbd(0, &bd);
 	}
 
-	printf("%s: end\n",__func__);
 	return (0);
 }
 
@@ -665,14 +670,14 @@ cpsw_start_locked(struct ifnet *ifp)
 	if (queued) {
 		/* Enable transmitter and watchdog timer */
 		cpsw_write_4(CPSW_CPDMA_TX_HDP(0), cpsw_cpdma_txbd_paddr(0));
-		printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
-		printf("%s: CPSW_CPDMA_DMASTATUS = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
-		printf("%s: CPSW_CPDMA_RX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_RX_HDP(0)));
-		printf("%s: CPSW_CPDMA_RX_CP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_RX_CP(0)));
-		DUMP_TXBD(0);
+
+		//printf("%s: tx0_cp:0x%08x tx0_hdp:0x%08x dmastatus:0x%08x\n", __func__, 
+		//	cpsw_read_4(CPSW_CPDMA_TX_CP(0)),
+		//	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)),
+		//	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
+		//DUMP_TXBD(0);
 		//sc->wd_timer = 5;
 	}
-	printf("%s: done\n",__func__);
 }
 
 static void
@@ -812,12 +817,13 @@ cpsw_intr_rx_locked(void *arg)
 		DUMP_RXBD(i);
 		cpsw_write_4(CPSW_CPDMA_RX_CP(0), cpsw_cpdma_rxbd_paddr(i));
 
+		if (bd.flags & CPDMA_BD_EOQ)
+			painc("FIXME: EOQ found in RX BD.");
+
 		bus_dmamap_sync(sc->mbuf_dtag, sc->rx_dmamap[i], BUS_DMASYNC_POSTREAD);
 
-		printf("================\n");
-		dump_packet(sc->rx_mbuf[i]->m_hdr.mh_data, bd.pktlen);
-		printf("vaddr=%x\n", sc->rx_mbuf[i]->m_hdr.mh_data);
-		printf("================\n");
+		//printf("RX PKT vaddr=%x\n", sc->rx_mbuf[i]->m_hdr.mh_data);
+		//dump_packet(sc->rx_mbuf[i]->m_hdr.mh_data, bd.pktlen);
 
 		/* Fill mbuf */
 		sc->rx_mbuf[i]->m_hdr.mh_data +=2;
@@ -831,17 +837,27 @@ cpsw_intr_rx_locked(void *arg)
 		(*ifp->if_input)(ifp, sc->rx_mbuf[i]);
 		CPSW_RX_LOCK(sc);
 		
+		/* Allocate new buffer for current descriptor */
+		cpsw_new_rxbuf(sc, i, 0);
+
 		/* check if last descriptor */
 		if (i == sc->rxbd_tail)
 			break;
 
+		/* we are not at tail so old tail BD should point to new one */
+		cpsw_cpdma_write_rxbd_next(sc->rxbd_tail,
+			cpsw_cpdma_rxbd_paddr(i));
+
 		/* read next descriptor */
 		cpsw_cpdma_read_rxbd(++i, &bd);
+		sc->rxbd_head = i;
 	}
 
-	printf("%s: CPSW_CPDMA_RX_CP(0) = %x\n", __func__, cpsw_read_4(CPSW_CPDMA_RX_CP(0)));
-	printf("%s: CPSW_CPDMA_RX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_RX_HDP(0)));
-	cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_read_4(CPSW_CPDMA_RX_CP(0)));
+	//printf("%s: rx0_cp:0x%08x rx0_hdp:0x%08x dmastatus:0x%08x\n", __func__, 
+	//	cpsw_read_4(CPSW_CPDMA_RX_CP(0)),
+	//	cpsw_read_4(CPSW_CPDMA_RX_HDP(0)),
+	//	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
+	//cpsw_write_4(CPSW_CPDMA_RX_HDP(0), cpsw_read_4(CPSW_CPDMA_RX_CP(0)));
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 1);
 }
 
@@ -849,11 +865,13 @@ static void
 cpsw_intr_tx(void *arg)
 {
 	struct cpsw_softc *sc = arg;
-	printf("%s: CPSW_CPDMA_TX_CP(0) = %x\n", __func__, cpsw_read_4(CPSW_CPDMA_TX_CP(0)));
-	printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
-	printf("%s: CPSW_CPDMA_DMASTATUS = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
+	//printf("%s: tx0_cp:0x%08x tx0_hdp:0x%08x dmastatus:0x%08x\n", __func__, 
+	//	cpsw_read_4(CPSW_CPDMA_TX_CP(0)),
+	//	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)),
+	//	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
+
 	cpsw_write_4(CPSW_CPDMA_TX_CP(0), cpsw_cpdma_txbd_paddr(0));
-	DUMP_TXBD(0);
+	//DUMP_TXBD(0);
 	cpsw_write_4(CPSW_CPDMA_CPDMA_EOI_VECTOR, 2);
 }
 
@@ -918,8 +936,8 @@ static void
 cpsw_init_locked(void *arg)
 {
 	struct cpsw_softc *sc = arg;
-	struct cpsw_cpdma_bd bd;
-	uint32_t i,a,r;
+	uint32_t next_bdp;
+	uint32_t i;
 
 	printf("%s: start\n",__func__);
 
@@ -993,19 +1011,13 @@ cpsw_init_locked(void *arg)
 
 	/* Initialize RX Buffer Descriptors */
 	i = CPSW_MAX_RX_BUFFERS;
-	bd.next = NULL;
+	next_bdp = 0;
 	while (i--) {
-		bd.buflen = MCLBYTES-1;
-		bd.bufoff = 2; /* make IP hdr aligned with 4 */
-		bd.pktlen = 0;
-		bd.flags = CPDMA_BD_OWNER;
-		cpsw_new_rxbuf(sc->mbuf_dtag, sc->rx_dmamap[i],
-			&sc->rx_mbuf[i], (bus_addr_t *) &bd.bufptr);
-		cpsw_cpdma_write_rxbd(i, &bd);
+		cpsw_new_rxbuf(sc, i, next_bdp);
 		/* Increment number of free RX buffers */
 		//cpsw_write_4(CPSW_CPDMA_RX_FREEBUFFER(0), 1);
+		next_bdp = cpsw_cpdma_rxbd_paddr(i);
 		DUMP_RXBD(i);
-		bd.next = (struct cpsw_cpdma_bd *) cpsw_cpdma_rxbd_paddr(i);
 	}
 
 	sc->rxbd_head = 0;
