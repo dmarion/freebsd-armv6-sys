@@ -636,7 +636,6 @@ cpsw_start_locked(struct ifnet *ifp)
 		return;
 
 	for (;;) {
-		printf("%s: for (;;)\n",__func__);
 		/* Get packet from the queue */
 		IF_DEQUEUE(&ifp->if_snd, m0);
 		if (m0 == NULL)
@@ -657,17 +656,9 @@ cpsw_start_locked(struct ifnet *ifp)
 
 	if (queued) {
 		/* Enable transmitter and watchdog timer */
-		printf("%s: process queued\n",__func__);
-		printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
 		cpsw_write_4(CPSW_CPDMA_TX_HDP(0), cpsw_cpdma_txbd_paddr(0));
 		printf("%s: CPSW_CPDMA_TX_HDP(0) = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_HDP(0)));
 		printf("%s: CPSW_CPDMA_DMASTATUS = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_DMASTATUS));
-		printf("%s: CPSW_CPDMA_TX_INTSTAT_RAW = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTSTAT_RAW));
-		printf("%s: CPSW_CPDMA_TX_INTSTAT_MASKED = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTSTAT_MASKED));
-		printf("%s: CPSW_CPDMA_TX_INTMASK_SET = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTMASK_SET));
-		printf("%s: CPSW_CPDMA_TX_INTMASK_CLEAR = 0x%x\n",__func__,	cpsw_read_4(CPSW_CPDMA_TX_INTMASK_CLEAR));
-		printf("%s: C0_RX_EN = 0x%x\n",__func__,	cpsw_read_4(CPSW_WR_OFFSET + 0x14));
-		printf("%s: C0_TX_EN = 0x%x\n",__func__,	cpsw_read_4(CPSW_WR_OFFSET + 0x18));
 		//DUMP_TXBD(0);
 		//sc->wd_timer = 5;
 	}
