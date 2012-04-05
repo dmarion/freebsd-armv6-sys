@@ -67,14 +67,26 @@ __FBSDID("$FreeBSD$");
 #define TI_EDMA3CC_DRAE(p)		(0x340 + ((p)*8))
 #define TI_EDMA3CC_DRAEH(p)		(0x344 + ((p)*8))
 #define TI_EDMA3CC_QRAE(p)		(0x380 + ((p)*4))
+#define TI_EDMA3CC_S_ESR(p)		(0x2010 + ((p)*0x200))
+#define TI_EDMA3CC_S_ESRH(p)		(0x2014 + ((p)*0x200))
+#define TI_EDMA3CC_S_SECR(p)		(0x2040 + ((p)*0x200))
+#define TI_EDMA3CC_S_SECRH(p)		(0x2044 + ((p)*0x200))
+#define TI_EDMA3CC_S_EESR(p)		(0x2030 + ((p)*0x200))
+#define TI_EDMA3CC_S_EESRH(p)		(0x2034 + ((p)*0x200))
+#define TI_EDMA3CC_S_IESR(p)		(0x2060 + ((p)*0x200))
+#define TI_EDMA3CC_S_IESRH(p)		(0x2064 + ((p)*0x200))
+#define TI_EDMA3CC_S_QEESR(p)		(0x208C + ((p)*0x200))
+
+#define PARAM_OFFSET			0x4000
+#define TI_EDMA3CC_OPT(p)		(PARAM_OFFSET + 0x0 + ((p)*0x20))
 
 #define TI_EDMA3CC_DMAQNUM_SET(c,q)	((0x7 & (q)) << (((c) % 8) * 4))
 #define TI_EDMA3CC_DMAQNUM_CLR(c)	(~(0x7 << (((c) % 8) * 4)))
 #define TI_EDMA3CC_QDMAQNUM_SET(c,q)	((0x7 & (q)) << ((c) * 4))
 #define TI_EDMA3CC_QDMAQNUM_CLR(c)	(~(0x7 << ((c) * 4)))
 
-
-
+#define TI_EDMA3CC_OPT_TCC_CLR		(~(0x3F000))
+#define TI_EDMA3CC_OPT_TCC_SET(p)	(((0x3F000 >> 12) & (p)) << 12)
 
 struct ti_edma_softc {
 	device_t		sc_dev;
@@ -98,8 +110,8 @@ static struct resource_spec ti_edma_irq_spec[] = {
 };
 
 /* Read/Write macros */
-#define ti_edma_cc_read_4(reg)		bus_read_4(sc->mem_res[0], reg)
-#define ti_edma_cc_write_4(reg, val)	bus_write_4(sc->mem_res[0], reg, val)
+#define ti_edma_cc_rd_4(reg)		bus_read_4(sc->mem_res[0], reg)
+#define ti_edma_cc_wr_4(reg, val)	bus_write_4(sc->mem_res[0], reg, val)
 #define ti_edma_tc_read_4(c, reg)	bus_read_4(sc->mem_res[c+1], reg)
 #define ti_edma_tc_write_4(c, reg, val)	bus_write_4(sc->mem_res[c+1], reg, val)
 
@@ -107,6 +119,14 @@ static void ti_edma_intr_comp(void *arg);
 static void ti_edma_intr_mperr(void *arg);
 static void ti_edma_intr_err(void *arg);
 static void ti_edma_init(struct ti_edma_softc *sc, unsigned int queue_num);
+static int ti_edma_enable_event_intr(struct ti_edma_softc *sc, unsigned int ch);
+int ti_edma_request_dma_ch(struct ti_edma_softc *sc, unsigned int ch,
+    unsigned int tcc_num, unsigned int evt_qnum);
+int ti_edma_request_qdma_ch(struct ti_edma_softc *sc, unsigned int ch,
+    unsigned int tcc_num, unsigned int evt_qnum);
+int ti_edma_enable_transfer_manual(struct ti_edma_softc *sc, unsigned int ch);
+int ti_edma_enable_transfer_qdma(struct ti_edma_softc *sc, unsigned int ch);
+int ti_edma_enable_transfer_event(struct ti_edma_softc *sc, unsigned int ch);
 
 static struct {
 	driver_intr_t *handler;
@@ -154,7 +174,7 @@ ti_edma_attach(device_t dev)
 	/* Enable Channel Controller */
 	ti_prcm_clk_enable(EDMA_TPCC_CLK);
 
-	reg = ti_edma_cc_read_4(TI_EDMA3CC_PID);
+	reg = ti_edma_cc_rd_4(TI_EDMA3CC_PID);
 
 	device_printf(dev, "EDMA revision %08x\n", reg);
 
@@ -217,38 +237,203 @@ ti_edma_init(struct ti_edma_softc *sc, unsigned int queue_num)
 	int i;
 
 	/* Clear Event Missed Regs */
-	ti_edma_cc_write_4(TI_EDMA3CC_EMCR, 0xFFFFFFFF);
-	ti_edma_cc_write_4(TI_EDMA3CC_EMCRH, 0xFFFFFFFF);
-	ti_edma_cc_write_4(TI_EDMA3CC_QEMCR, 0xFFFFFFFF);
+	ti_edma_cc_wr_4(TI_EDMA3CC_EMCR, 0xFFFFFFFF);
+	ti_edma_cc_wr_4(TI_EDMA3CC_EMCRH, 0xFFFFFFFF);
+	ti_edma_cc_wr_4(TI_EDMA3CC_QEMCR, 0xFFFFFFFF);
 
 	/* Clear Error Reg */
-	ti_edma_cc_write_4(TI_EDMA3CC_CCERRCLR, 0xFFFFFFFF);
+	ti_edma_cc_wr_4(TI_EDMA3CC_CCERRCLR, 0xFFFFFFFF);
 
 	/* Enable DMA channels 0-63 */
-	ti_edma_cc_write_4(TI_EDMA3CC_DRAE(0), 0xFFFFFFFF);
-	ti_edma_cc_write_4(TI_EDMA3CC_DRAEH(0), 0xFFFFFFFF);
+	ti_edma_cc_wr_4(TI_EDMA3CC_DRAE(0), 0xFFFFFFFF);
+	ti_edma_cc_wr_4(TI_EDMA3CC_DRAEH(0), 0xFFFFFFFF);
 
 	for (i = 0; i < 64; i++) {
-		ti_edma_cc_write_4(TI_EDMA3CC_DCHMAP(i), i<<5);
+		ti_edma_cc_wr_4(TI_EDMA3CC_DCHMAP(i), i<<5);
 	}
 
 	/* Initialize the DMA Queue Number Registers */
 	for (i = 0; i < TI_EDMA_NUM_DMA_CHS; i++) {
-		reg = ti_edma_cc_read_4(TI_EDMA3CC_DMAQNUM(i>>3));
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_DMAQNUM(i>>3));
 		reg &= TI_EDMA3CC_DMAQNUM_CLR(i);
 		reg |= TI_EDMA3CC_DMAQNUM_SET(i, queue_num);
-		ti_edma_cc_write_4(TI_EDMA3CC_DMAQNUM(i>>3), reg);
+		ti_edma_cc_wr_4(TI_EDMA3CC_DMAQNUM(i>>3), reg);
 	}
 
 	/* Enable the QDMA Region access for all channels */
-	ti_edma_cc_write_4(TI_EDMA3CC_QRAE(0), (1 << TI_EDMA_NUM_QDMA_CHS) - 1);
+	ti_edma_cc_wr_4(TI_EDMA3CC_QRAE(0), (1 << TI_EDMA_NUM_QDMA_CHS) - 1);
 
 	/*Initialize QDMA Queue Number Registers */
 	for (i = 0; i < TI_EDMA_NUM_QDMA_CHS; i++) {
-		reg = ti_edma_cc_read_4(TI_EDMA3CC_QDMAQNUM);
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_QDMAQNUM);
 		reg &= TI_EDMA3CC_QDMAQNUM_CLR(i);
 		reg |= TI_EDMA3CC_QDMAQNUM_SET(i, queue_num);
-		ti_edma_cc_write_4(TI_EDMA3CC_QDMAQNUM, reg);
+		ti_edma_cc_wr_4(TI_EDMA3CC_QDMAQNUM, reg);
 	}
+}
+
+int
+ti_edma_enable_event_intr(struct ti_edma_softc *sc, unsigned int ch)
+{
+	uint32_t reg;
+
+	if (ch >= TI_EDMA_NUM_DMA_CHS)
+		return (-EINVAL);
+
+	if (ch < 32) {
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_S_IESR(0));
+		reg |= 1 << ch;
+		ti_edma_cc_wr_4(TI_EDMA3CC_S_IESR(0), reg);
+	} else {
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_S_IESRH(0));
+		reg |= 1 << (ch - 32);
+		ti_edma_cc_wr_4(TI_EDMA3CC_S_IESRH(0), reg);
+	}
+	return 0;
+}
+
+int
+ti_edma_request_dma_ch(struct ti_edma_softc *sc, unsigned int ch,
+    unsigned int tcc_num, unsigned int evt_qnum)
+{
+        unsigned int r = 0;
+	uint32_t reg;
+
+	if (ch >= TI_EDMA_NUM_DMA_CHS)
+		return (-EINVAL);
+
+	/* Enable the DMA channel in the DRAE/DRAEH registers */
+	if (ch < 32) {
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_DRAE(0));
+		reg |= (0x01 << ch);
+		ti_edma_cc_wr_4(TI_EDMA3CC_DRAE(0), reg);
+	} else {
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_DRAEH(0));
+		reg |= (0x01 << (ch - 32));
+		ti_edma_cc_wr_4(TI_EDMA3CC_DRAEH(0), reg);
+	}
+
+	/* Associate DMA Channel to Event Queue */
+	reg = ti_edma_cc_rd_4(TI_EDMA3CC_DMAQNUM(ch >> 3));
+	reg &= TI_EDMA3CC_DMAQNUM_CLR(ch);
+	reg |= TI_EDMA3CC_DMAQNUM_SET((ch), evt_qnum);
+	ti_edma_cc_wr_4(TI_EDMA3CC_DMAQNUM(ch >> 3), reg);
+
+	/* Interrupt channel nums are < 32 */
+	if (tcc_num < TI_EDMA_NUM_DMA_CHS) {
+		/* Enable the Event Interrupt */
+		ti_edma_enable_event_intr(sc, ch);
+		r = 1;
+	}
+
+	reg = ti_edma_cc_rd_4(TI_EDMA3CC_OPT(ch));
+	reg &= TI_EDMA3CC_OPT_TCC_CLR;
+	reg |= TI_EDMA3CC_OPT_TCC_SET(ch);
+	ti_edma_cc_wr_4(TI_EDMA3CC_OPT(ch), reg);
+
+	return r;
+}
+
+int
+ti_edma_request_qdma_ch(struct ti_edma_softc *sc, unsigned int ch,
+    unsigned int tcc_num, unsigned int evt_qnum)
+{
+	unsigned int r = 0;
+	uint32_t reg;
+
+	if (ch >= TI_EDMA_NUM_DMA_CHS)
+		return (-EINVAL);
+
+	/* Enable the QDMA channel in the QRAE registers */
+	reg = ti_edma_cc_rd_4(TI_EDMA3CC_QRAE(0));
+	reg |= (0x01 << ch);
+	ti_edma_cc_wr_4(TI_EDMA3CC_QRAE(0), reg);
+
+	/* Associate QDMA Channel to Event Queue */
+	reg = ti_edma_cc_rd_4(TI_EDMA3CC_QDMAQNUM);
+	reg |= TI_EDMA3CC_QDMAQNUM_SET(ch, evt_qnum);
+	ti_edma_cc_wr_4(TI_EDMA3CC_QDMAQNUM, reg);
+
+	/* Interrupt channel nums are < 8 */
+	if (tcc_num < TI_EDMA_NUM_QDMA_CHS) {
+		/* Enable the Event Interrupt */
+		ti_edma_enable_event_intr(sc, ch);
+		r = 1;
+	}
+
+	reg = ti_edma_cc_rd_4(TI_EDMA3CC_OPT(ch));
+	reg &= TI_EDMA3CC_OPT_TCC_CLR;
+	reg |= TI_EDMA3CC_OPT_TCC_SET(ch);
+	ti_edma_cc_wr_4(TI_EDMA3CC_OPT(ch), reg);
+
+	return r;
+}
+
+int
+ti_edma_enable_transfer_manual(struct ti_edma_softc *sc, unsigned int ch)
+{
+	uint32_t reg;
+
+	if (ch >= TI_EDMA_NUM_DMA_CHS)
+		return (-EINVAL);
+
+	/* set corresponding bit in ESR/ESRH to set a event */
+	if (ch < 32) {
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_S_ESR(0));
+		reg |= (1 <<  ch);
+		ti_edma_cc_wr_4(TI_EDMA3CC_S_ESR(0), reg);
+	} else {
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_S_ESRH(0));
+		reg |= (1 <<  (ch - 32));
+		ti_edma_cc_wr_4(TI_EDMA3CC_S_ESRH(0), reg);
+	}
+
+	return 0;
+}
+
+
+int
+ti_edma_enable_transfer_qdma(struct ti_edma_softc *sc, unsigned int ch)
+{
+	if (ch >= TI_EDMA_NUM_QDMA_CHS)
+		return (-EINVAL);
+
+	/* set corresponding bit in QEESR to enable QDMA event */
+	ti_edma_cc_wr_4(TI_EDMA3CC_S_QEESR(0), (1 << ch));
+
+	return 0;
+}
+
+int
+ti_edma_enable_transfer_event(struct ti_edma_softc *sc, unsigned int ch)
+{
+	uint32_t reg;
+	if (ch >= TI_EDMA_NUM_DMA_CHS)
+		return (-EINVAL);
+
+	/* clear SECR(H) & EMCR(H) to clean any previous NULL request */
+	if(ch < 32) {
+		ti_edma_cc_wr_4(TI_EDMA3CC_S_SECR(0), (1 << ch));
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_EMCR);
+		reg |= (1 << ch);
+		ti_edma_cc_wr_4(TI_EDMA3CC_EMCR, reg);
+
+		/* set corresponding bit in EESR to enable DMA event */
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_S_EESR(0));
+		reg |= (1 << ch);
+		ti_edma_cc_wr_4(TI_EDMA3CC_S_EESR(0), reg);
+	} else {
+		ti_edma_cc_wr_4(TI_EDMA3CC_S_SECRH(0), (1 << (ch - 32)));
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_EMCRH);
+		reg |= (1 << (ch - 32));
+		ti_edma_cc_wr_4(TI_EDMA3CC_EMCRH, reg);
+
+		/* set corresponding bit in EESRH to enable DMA event */
+		reg = ti_edma_cc_rd_4(TI_EDMA3CC_S_EESRH(0));
+		reg |= (1 << (ch - 32));
+		ti_edma_cc_wr_4(TI_EDMA3CC_S_EESRH(0), reg);
+	}
+
+	return 0;
 }
 
