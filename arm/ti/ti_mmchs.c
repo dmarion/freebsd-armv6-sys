@@ -395,13 +395,13 @@ ti_mmchs_intr_error(struct ti_mmchs_softc *sc, struct mmc_command *cmd,
 			printf("%s: DMA unimplemented\n", __func__);
 #else
 			ti_sdma_stop_xfer(sc->sc_dmach_rd);
-#elif
+#endif
 		else
 #ifdef SOC_TI_AM335X
 			printf("%s: DMA unimplemented\n", __func__);
 #else
 			ti_sdma_stop_xfer(sc->sc_dmach_wr);
-#elif
+#endif
 
 		/* If an error occure abort the DMA operation and free the dma map */
 		if ((sc->sc_dmamapped > 0) && (cmd->error != MMC_ERR_NONE)) {
@@ -958,10 +958,13 @@ ti_mmchs_update_ios(device_t brdev, device_t reqdev)
 
 			ti_mmchs_write_4(sc, MMCHS_HCTL, hctl_reg);
 
+#ifdef SOC_TI_AM335X
+			printf("%s: TWL unimplemented\n", __func__);
+#else
 			/* Set the desired voltage on the regulator */
 			if (sc->sc_vreg_dev && sc->sc_vreg_name)
 				twl_vreg_set_voltage(sc->sc_vreg_dev, sc->sc_vreg_name, mv);
-
+#endif
 			/* Enable the bus power */
 			ti_mmchs_write_4(sc, MMCHS_HCTL, (hctl_reg | MMCHS_HCTL_SDBP));
 			timeout = hz;
@@ -976,10 +979,13 @@ ti_mmchs_update_ios(device_t brdev, device_t reqdev)
 			hctl_reg = ti_mmchs_read_4(sc, MMCHS_HCTL);
 			ti_mmchs_write_4(sc, MMCHS_HCTL, (hctl_reg & ~MMCHS_HCTL_SDBP));
 
+#ifdef SOC_TI_AM335X
+			printf("%s: TWL unimplemented\n", __func__);
+#else
 			/* Turn the power off on the voltage regulator */
 			if (sc->sc_vreg_dev && sc->sc_vreg_name)
 				twl_vreg_set_voltage(sc->sc_vreg_dev, sc->sc_vreg_name, 0);
-
+#endif
 		} else if (ios->power_mode == power_on) {
 			/* Force a card re-initialisation sequence */
 			do_card_init = 1;
@@ -1537,6 +1543,8 @@ ti_mmchs_activate(device_t dev)
 		sc->sc_reg_off = OMAP3_MMCHS_REG_OFFSET;
 	else if (ti_chip() == CHIP_OMAP_4)
 		sc->sc_reg_off = OMAP4_MMCHS_REG_OFFSET;
+	else if (ti_chip() == CHIP_AM335X)
+		sc->sc_reg_off = AM335X_MMCHS_REG_OFFSET;
 	else
 		panic("Unknown OMAP device\n");
 
